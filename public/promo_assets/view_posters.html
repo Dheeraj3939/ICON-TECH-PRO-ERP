@@ -1,0 +1,294 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICON TECH PRO - Vinayaka Chavithi Cinematic Film Posters</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #060608;
+      color: #e8e8ea;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      padding: 50px 24px 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .header {
+      text-align: center;
+      max-width: 800px;
+      margin-bottom: 48px;
+    }
+    .studio-tag {
+      display: inline-block;
+      font-size: 11px;
+      letter-spacing: 5px;
+      text-transform: uppercase;
+      color: #d4af37;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+    h1 {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      color: #fff;
+      text-transform: uppercase;
+      background: linear-gradient(135deg, #fff7ea 0%, #d4af37 60%, #aa8420 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 14px;
+    }
+    p.subtitle {
+      color: #8e8e96;
+      font-size: 15px;
+      line-height: 1.6;
+      letter-spacing: 0.5px;
+    }
+
+    /* Section Tabs */
+    .section-title {
+      font-size: 18px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #d4af37;
+      margin: 40px 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      width: 100%;
+      max-width: 1200px;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(212, 175, 55, 0.4), transparent);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+      gap: 36px;
+      max-width: 1200px;
+      width: 100%;
+    }
+    @media (max-width: 768px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: #0e0e12;
+      border: 1px solid #1e1e26;
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+    }
+    .card:hover {
+      transform: translateY(-6px);
+      border-color: #d4af37;
+      box-shadow: 0 30px 60px rgba(212, 175, 55, 0.15);
+    }
+    .card-image-wrap {
+      position: relative;
+      background: #000;
+      cursor: pointer;
+    }
+    .card img {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      display: block;
+    }
+    .card-info {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex: 1;
+      background: linear-gradient(180deg, #101014 0%, #0c0c0f 100%);
+    }
+    .badge-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      padding: 4px 12px;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+    .badge.blockbuster {
+      background: linear-gradient(135deg, rgba(212, 175, 55, 0.25), rgba(212, 175, 55, 0.05));
+      color: #f7d57f;
+      border: 1px solid rgba(212, 175, 55, 0.5);
+    }
+    .badge.editorial {
+      background: rgba(255, 255, 255, 0.08);
+      color: #dcdcdc;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+    .card-title {
+      font-size: 22px;
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    .card-desc {
+      font-size: 14px;
+      color: #9c9ca4;
+      line-height: 1.6;
+    }
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    .btn-primary {
+      flex: 1;
+      padding: 12px 18px;
+      background: linear-gradient(135deg, #f5d17e 0%, #d4af37 100%);
+      color: #000;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      border-radius: 6px;
+      text-align: center;
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    .btn-primary:hover {
+      opacity: 0.92;
+      transform: scale(1.02);
+    }
+    .btn-secondary {
+      padding: 12px 18px;
+      background: #1a1a22;
+      color: #e0e0e6;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 13px;
+      letter-spacing: 0.5px;
+      border-radius: 6px;
+      text-align: center;
+      border: 1px solid #2d2d38;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover {
+      background: #252530;
+      border-color: #d4af37;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <span class="studio-tag">ICON TECH PRO  •  CINEMATIC PRODUCTION</span>
+    <h1>Vinayaka Chavithi Blockbuster Posters</h1>
+    <p class="subtitle">Designed through the lens of a big-film teaser director — combining IMAX scale, photorealistic basalt sculpture, cybernetic stargate mandalas, and authentic Hollywood key-art typography.</p>
+  </div>
+
+  <!-- SECTION 1: BLOCKBUSTER FILM EDITIONS -->
+  <div class="section-title">Blockbuster Film Key-Art Editions (1080 × 1080)</div>
+  <div class="grid">
+
+    <!-- Film Poster 1: The Quantum Sanctum -->
+    <div class="card">
+      <div class="card-image-wrap">
+        <a href="cinematic_poster_sanctum.png" target="_blank">
+          <img src="cinematic_poster_sanctum.png" alt="The Quantum Sanctum Film Poster">
+        </a>
+      </div>
+      <div class="card-info">
+        <div class="badge-row">
+          <span class="badge blockbuster">★ Master Key-Art • Edition 1</span>
+        </div>
+        <div class="card-title">"The Quantum Sanctum"</div>
+        <div class="card-desc">Monumental dark obsidian columns flank a meditative Lord Ganesha, backlit by an immense holographic stargate mandala bursting with volumetric god-rays over a reflective wet slate floor. Features Hollywood studio presenter banner, cinematic gold title treatment, and full enterprise AV billing.</div>
+        <div class="btn-row">
+          <a class="btn-primary" href="cinematic_poster_sanctum.png" download="ICON_TECH_PRO_Sanctum_Blockbuster_Poster.png">Download Poster (1080p)</a>
+          <a class="btn-secondary" href="cinematic_poster_sanctum.png" target="_blank">Open Full Size</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Film Poster 2: The Titan Awakens -->
+    <div class="card">
+      <div class="card-image-wrap">
+        <a href="cinematic_poster_titan.png" target="_blank">
+          <img src="cinematic_poster_titan.png" alt="The Titan Awakens Film Poster">
+        </a>
+      </div>
+      <div class="card-info">
+        <div class="badge-row">
+          <span class="badge blockbuster">★ Master Key-Art • Edition 2</span>
+        </div>
+        <div class="card-title">"The Titan / Anamorphic Dawn"</div>
+        <div class="card-desc">A dramatic low-angle hero perspective looking up into cosmic atmospheric smoke and amber anamorphic horizontal lens flare. Intricate liquid-gold circuitry glows through the titanium trunk and ornaments, delivering raw power and cinematic scale.</div>
+        <div class="btn-row">
+          <a class="btn-primary" href="cinematic_poster_titan.png" download="ICON_TECH_PRO_Titan_Blockbuster_Poster.png">Download Poster (1080p)</a>
+          <a class="btn-secondary" href="cinematic_poster_titan.png" target="_blank">Open Full Size</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SECTION 2: LUXURY BRAND EDITORIAL EDITIONS -->
+  <div class="section-title">Luxury Corporate & Editorial Editions (1080 × 1080)</div>
+  <div class="grid">
+
+    <!-- Master Corporate Poster -->
+    <div class="card">
+      <div class="card-image-wrap">
+        <a href="icon_tech_pro_vinayaka_chavithi_poster.png" target="_blank">
+          <img src="icon_tech_pro_vinayaka_chavithi_poster.png" alt="Luxury Corporate Poster">
+        </a>
+      </div>
+      <div class="card-info">
+        <div class="badge-row">
+          <span class="badge editorial">Luxury Editorial</span>
+        </div>
+        <div class="card-title">"Tradition Meets Technology"</div>
+        <div class="card-desc">Sleek, minimalist studio lighting with the circuit-kolam floor transformation and clean negative space. Top festive headline with the official ICON TECH PRO logo badge grounded gracefully at the bottom.</div>
+        <div class="btn-row">
+          <a class="btn-primary" href="icon_tech_pro_vinayaka_chavithi_poster.png" download="ICON_TECH_PRO_Master_Editorial.png">Download Poster</a>
+          <a class="btn-secondary" href="icon_tech_pro_vinayaka_chavithi_poster.png" target="_blank">Open Full Size</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Layout Option A -->
+    <div class="card">
+      <div class="card-image-wrap">
+        <a href="poster_option_a.png" target="_blank">
+          <img src="poster_option_a.png" alt="Brand First Layout">
+        </a>
+      </div>
+      <div class="card-info">
+        <div class="badge-row">
+          <span class="badge editorial">Brand-First Header</span>
+        </div>
+        <div class="card-title">"Brand-First Architecture"</div>
+        <div class="card-desc">Features the official ICON TECH PRO branding at the top header, framing Lord Ganesha with the greeting and blessings anchoring the footer.</div>
+        <div class="btn-row">
+          <a class="btn-primary" href="poster_option_a.png" download="ICON_TECH_PRO_Brand_First.png">Download Poster</a>
+          <a class="btn-secondary" href="poster_option_a.png" target="_blank">Open Full Size</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

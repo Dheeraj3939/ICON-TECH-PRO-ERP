@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICON TECH PRO — 25+ Years of Technology Excellence | Cinematic Commercial & Posters</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #070a12;
+      --bg-card: rgba(15, 23, 42, 0.85);
+      --border-card: rgba(56, 189, 248, 0.25);
+      --accent-cyan: #38bdf8;
+      --accent-blue: #0284c7;
+      --accent-glow: rgba(56, 189, 248, 0.4);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 50% 0%, rgba(14, 165, 233, 0.15) 0%, transparent 50%),
+        radial-gradient(circle at 100% 50%, rgba(2, 132, 199, 0.1) 0%, transparent 40%),
+        radial-gradient(circle at 0% 80%, rgba(56, 189, 248, 0.08) 0%, transparent 40%);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      padding-bottom: 80px;
+    }
+
+    /* Container */
+    .container {
+      max-width: 1300px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Header */
+    header {
+      padding: 30px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(16px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(7, 10, 18, 0.85);
+    }
+    .header-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .logo-img {
+      height: 52px;
+      background: #ffffff;
+      padding: 4px 10px;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0, 160, 255, 0.3);
+    }
+    .header-tag {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid var(--accent-cyan);
+      color: var(--accent-cyan);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding: 6px 14px;
+      border-radius: 30px;
+      text-transform: uppercase;
+    }
+
+    /* Hero Showcase Grid */
+    .hero-section {
+      display: grid;
+      grid-template-columns: 460px 1fr;
+      gap: 50px;
+      margin-top: 50px;
+      align-items: start;
+    }
+    @media (max-width: 1024px) {
+      .hero-section {
+        grid-template-columns: 1fr;
+        justify-items: center;
+      }
+    }
+
+    /* Phone Mockup / 9:16 Video Player */
+    .video-device-frame {
+      width: 100%;
+      max-width: 440px;
+      aspect-ratio: 9/16;
+      background: #000;
+      border-radius: 36px;
+      padding: 12px;
+      box-shadow: 
+        0 0 0 2px rgba(255, 255, 255, 0.15),
+        0 25px 60px -15px rgba(0, 0, 0, 0.9),
+        0 0 80px rgba(14, 165, 233, 0.25);
+      position: relative;
+    }
+    .screen-inner {
+      width: 100%;
+      height: 100%;
+      border-radius: 26px;
+      overflow: hidden;
+      position: relative;
+      background: #050811;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    /* Video Player Overlay Controls */
+    .video-controls-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 24px 16px 16px;
+      background: linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 60%, transparent 100%);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: opacity 0.3s;
+    }
+    .progress-bar-container {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.25);
+      border-radius: 3px;
+      cursor: pointer;
+      position: relative;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent-cyan);
+      border-radius: 3px;
+      width: 0%;
+      box-shadow: 0 0 10px var(--accent-cyan);
+    }
+    .controls-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .btn-icon {
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      border-radius: 50%;
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.2s;
+    }
+    .btn-icon:hover {
+      background: var(--accent-cyan);
+      color: #000;
+      transform: scale(1.05);
+    }
+    .time-display {
+      font-size: 12px;
+      font-family: monospace;
+      color: #cbd5e1;
+    }
+
+    /* Video Meta & Details */
+    .video-meta-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .badge-experience {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(90deg, rgba(2, 132, 199, 0.25), rgba(56, 189, 248, 0.1));
+      border: 1px solid var(--accent-cyan);
+      color: #38bdf8;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 14px;
+      width: fit-content;
+    }
+    h1 {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 42px;
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: -0.5px;
+    }
+    h1 span {
+      background: linear-gradient(90deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    /* Scene Jump Navigation */
+    .scene-jump-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+    .scene-jump-title {
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--accent-cyan);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .scene-buttons-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    .scene-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #e2e8f0;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .scene-btn:hover {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: var(--accent-cyan);
+      color: #fff;
+      transform: translateY(-2px);
+    }
+    .scene-time {
+      font-size: 11px;
+      color: var(--accent-cyan);
+      font-weight: 700;
+    }
+
+    /* Actions Download Bar */
+    .download-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-top: 10px;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: linear-gradient(135deg, #0284c7, #0284c7 30%, #38bdf8);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 16px;
+      padding: 16px 28px;
+      border-radius: 12px;
+      box-shadow: 0 8px 25px rgba(2, 132, 199, 0.4);
+      transition: all 0.25s;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 35px rgba(2, 132, 199, 0.6);
+      filter: brightness(1.1);
+    }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      padding: 16px 24px;
+      border-radius: 12px;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: #fff;
+      transform: translateY(-2px);
+    }
+
+    /* Poster Gallery Section */
+    .posters-section {
+      margin-top: 90px;
+    }
+    .section-header {
+      text-align: center;
+      margin-bottom: 45px;
+    }
+    .section-title {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 36px;
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+    .section-subtitle {
+      color: var(--text-muted);
+      font-size: 16px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .posters-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 30px;
+    }
+    .poster-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 20px;
+      overflow: hidden;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+    }
+    .poster-card:hover {
+      transform: translateY(-8px);
+      border-color: var(--accent-cyan);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 30px var(--accent-glow);
+    }
+    .poster-preview-wrap {
+      width: 100%;
+      aspect-ratio: 9/16;
+      overflow: hidden;
+      position: relative;
+      background: #000;
+      cursor: pointer;
+    }
+    .poster-preview-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.4s;
+    }
+    .poster-card:hover .poster-preview-img {
+      transform: scale(1.03);
+    }
+    .poster-info {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex: 1;
+      justify-content: space-between;
+    }
+    .poster-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .poster-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .btn-download-poster {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid var(--accent-cyan);
+      color: var(--accent-cyan);
+      text-decoration: none;
+      text-align: center;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      transition: all 0.2s;
+    }
+    .btn-download-poster:hover {
+      background: var(--accent-cyan);
+      color: #000;
+    }
+
+    /* Corporate Solutions Matrix */
+    .solutions-section {
+      margin-top: 90px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 28px;
+      padding: 50px;
+    }
+    .solutions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 30px;
+    }
+    .solution-item {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 16px 20px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #e2e8f0;
+      transition: all 0.2s;
+    }
+    .solution-item:hover {
+      border-color: var(--accent-cyan);
+      background: rgba(56, 189, 248, 0.08);
+      transform: translateX(4px);
+    }
+    .solution-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-cyan);
+      box-shadow: 0 0 8px var(--accent-cyan);
+    }
+
+    /* Contact Card */
+    .contact-footer-card {
+      margin-top: 50px;
+      background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(2, 132, 199, 0.2));
+      border: 1px solid var(--accent-cyan);
+      border-radius: 24px;
+      padding: 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      align-items: center;
+    }
+    @media (max-width: 768px) {
+      .contact-footer-card {
+        grid-template-columns: 1fr;
+      }
+    }
+    .contact-info-title {
+      font-size: 24px;
+      font-weight: 800;
+      font-family: 'Montserrat', sans-serif;
+      margin-bottom: 8px;
+    }
+    .contact-lines {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 16px;
+      font-size: 15px;
+      color: #cbd5e1;
+    }
+    .contact-highlight {
+      color: var(--accent-cyan);
+      font-weight: 700;
+    }
+
+    /* Modal for Image Preview */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.95);
+      backdrop-filter: blur(10px);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
+    }
+    .modal.active {
+      display: flex;
+    }
+    .modal img {
+      max-height: 90vh;
+      max-width: 90vw;
+      border-radius: 12px;
+      box-shadow: 0 0 50px rgba(56, 189, 248, 0.4);
+    }
+    .modal-close {
+      position: absolute;
+      top: 25px;
+      right: 35px;
+      font-size: 40px;
+      color: #fff;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="container header-inner">
+      <div class="logo-container">
+        <img src="promo_assets/icon_tech_pro_logo.png" alt="ICON TECH PRO Logo" class="logo-img">
+      </div>
+      <div class="header-tag">
+        25+ Years of Technology Excellence
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Hero Commercial Player Section -->
+    <section class="hero-section">
+      <!-- 9:16 Vertical Video Screen Frame -->
+      <div class="video-device-frame">
+        <div class="screen-inner">
+          <video id="promoVideo" playsinline preload="auto" poster="promo_assets/scene1.jpg">
+            <source src="icon_tech_pro_commercial_1080x1920.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+          </video>
+          
+          <div class="video-controls-overlay" id="controlsOverlay">
+            <div class="progress-bar-container" id="progressBar">
+              <div class="progress-bar-fill" id="progressFill"></div>
+            </div>
+            <div class="controls-row">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <button class="btn-icon" id="playPauseBtn" title="Play/Pause">▶</button>
+                <button class="btn-icon" id="muteBtn" title="Mute/Unmute">🔊</button>
+                <span class="time-display" id="timeDisplay">0:00 / 0:32</span>
+              </div>
+              <button class="btn-icon" id="fullscreenBtn" title="Fullscreen">⛶</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Meta, Scene Navigator & CTAs -->
+      <div class="video-meta-panel">
+        <div class="badge-experience">
+          ★ 25+ YEARS OF EXPERIENCE & TRUST
+        </div>
+        <h1>
+          Complete Technology Solutions. <br>
+          <span>Cinematic Commercial</span>
+        </h1>
+        <p class="subtitle">
+          Engineered for executive corporate presentations, Instagram Reels, YouTube Shorts, and enterprise branding. Featuring photorealistic 4K cinematography, volumetric lighting, and unified IT/AV solutions.
+        </p>
+
+        <!-- Scene Jump Navigator -->
+        <div class="scene-jump-card">
+          <div class="scene-jump-title">
+            <span>⚡ Interactive Scene Navigator (Click to Jump)</span>
+          </div>
+          <div class="scene-buttons-grid">
+            <button class="scene-btn" onclick="seekTo(0.0)">
+              <span class="scene-time">0:00 – SCENE 1</span>
+              <span>Premium Opening & Logo</span>
+            </button>
+            <button class="scene-btn" onclick="seekTo(4.0)">
+              <span class="scene-time">0:04 – SCENE 2</span>
+              <span>Technology Showcase</span>
+            </button>
+            <button class="scene-btn" onclick="seekTo(8.0)">
+              <span class="scene-time">0:08 – SCENE 3</span>
+              <span>Executive Boardroom</span>
+            </button>
+            <button class="scene-btn" onclick="seekTo(12.0)">
+              <span class="scene-time">0:12 – SCENE 4</span>
+              <span>Security & CCTV Dome</span>
+            </button>
+            <button class="scene-btn" onclick="seekTo(16.0)">
+              <span class="scene-time">0:16 – SCENE 5</span>
+              <span>Luxury Home Cinema</span>
+            </button>
+            <button class="scene-btn" onclick="seekTo(20.0)">
+              <span class="scene-time">0:20 – SCENE 6</span>
+              <span>Unified Solutions Grid</span>
+            </button>
+            <button class="scene-btn" onclick="seekTo(24.0)">
+              <span class="scene-time">0:24 – SCENE 7</span>
+              <span>25+ Years of Trust</span>
+            </button>
+            <button class="scene-btn" onclick="seekTo(27.5)">
+              <span class="scene-time">0:27 – SCENE 8</span>
+              <span>Final Brand Lockup</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Download Buttons -->
+        <div class="download-actions">
+          <a href="icon_tech_pro_commercial_1080x1920.mp4" download="ICON_TECH_PRO_Commercial_1080x1920.mp4" class="btn-primary">
+            <span>⬇ Download 1080×1920 Commercial (MP4)</span>
+          </a>
+          <a href="#postersSection" class="btn-secondary">
+            <span>View 4K Posters Suite</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Promotional Posters Gallery -->
+    <section class="posters-section" id="postersSection">
+      <div class="section-header">
+        <h2 class="section-title">Ultra-HD 9:16 Promotional Posters</h2>
+        <p class="section-subtitle">High-resolution (1080×1920) print and social media visual assets tailored for Instagram Stories, print banners, and client portfolios.</p>
+      </div>
+
+      <div class="posters-grid">
+        <!-- Poster 1 -->
+        <div class="poster-card">
+          <div class="poster-preview-wrap" onclick="openModal('promo_assets/poster_master.png')">
+            <img src="promo_assets/poster_master.png" alt="Master Key Visual Poster" class="poster-preview-img">
+          </div>
+          <div class="poster-info">
+            <div>
+              <div class="poster-name">Master Key Visual Poster</div>
+              <div class="poster-desc">Complete Technology Solutions ecosystem highlight with 25+ years milestone & brand references.</div>
+            </div>
+            <a href="promo_assets/poster_master.png" download="ICON_TECH_PRO_Poster_Master.png" class="btn-download-poster">
+              Download Full-Res Poster
+            </a>
+          </div>
+        </div>
+
+        <!-- Poster 2 -->
+        <div class="poster-card">
+          <div class="poster-preview-wrap" onclick="openModal('promo_assets/poster_boardroom.png')">
+            <img src="promo_assets/poster_boardroom.png" alt="Boardroom Solutions Poster" class="poster-preview-img">
+          </div>
+          <div class="poster-info">
+            <div>
+              <div class="poster-name">Corporate AV & Boardroom</div>
+              <div class="poster-desc">Smart • Connected • Professional. Highlighting 4K interactive touch panels, beamforming mics & video conferencing.</div>
+            </div>
+            <a href="promo_assets/poster_boardroom.png" download="ICON_TECH_PRO_Poster_Boardroom.png" class="btn-download-poster">
+              Download Full-Res Poster
+            </a>
+          </div>
+        </div>
+
+        <!-- Poster 3 -->
+        <div class="poster-card">
+          <div class="poster-preview-wrap" onclick="openModal('promo_assets/poster_security.png')">
+            <img src="promo_assets/poster_security.png" alt="Security & Infrastructure Poster" class="poster-preview-img">
+          </div>
+          <div class="poster-info">
+            <div>
+              <div class="poster-name">Intelligent Security & CCTV</div>
+              <div class="poster-desc">AI-powered 4K surveillance domes, command center video walls, and high-speed enterprise fiber networking.</div>
+            </div>
+            <a href="promo_assets/poster_security.png" download="ICON_TECH_PRO_Poster_Security.png" class="btn-download-poster">
+              Download Full-Res Poster
+            </a>
+          </div>
+        </div>
+
+        <!-- Poster 4 -->
+        <div class="poster-card">
+          <div class="poster-preview-wrap" onclick="openModal('promo_assets/poster_home_theater.png')">
+            <img src="promo_assets/poster_home_theater.png" alt="Luxury Home Theater Poster" class="poster-preview-img">
+          </div>
+          <div class="poster-info">
+            <div>
+              <div class="poster-name">Luxury Home Entertainment</div>
+              <div class="poster-desc">Bespoke 4K laser cinema, Dolby Atmos acoustics, starry fiber-optic ceilings & smart home automation.</div>
+            </div>
+            <a href="promo_assets/poster_home_theater.png" download="ICON_TECH_PRO_Poster_HomeTheater.png" class="btn-download-poster">
+              Download Full-Res Poster
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Complete Solutions Catalog Matrix -->
+    <section class="solutions-section">
+      <h2 class="section-title" style="font-size: 28px;">Complete Technology Solutions Portfolio</h2>
+      <p class="section-subtitle" style="margin: 0; max-width: none;">Over 25+ years delivering end-to-end IT, AV, security, and automation infrastructure across India.</p>
+
+      <div class="solutions-grid">
+        <div class="solution-item"><span class="solution-dot"></span> 1. Projectors & Home Theater</div>
+        <div class="solution-item"><span class="solution-dot"></span> 2. Professional Audio & Speakers</div>
+        <div class="solution-item"><span class="solution-dot"></span> 3. Conference Room Solutions</div>
+        <div class="solution-item"><span class="solution-dot"></span> 4. Interactive Displays & Panels</div>
+        <div class="solution-item"><span class="solution-dot"></span> 5. Commercial LED Displays</div>
+        <div class="solution-item"><span class="solution-dot"></span> 6. CCTV & Security Solutions</div>
+        <div class="solution-item"><span class="solution-dot"></span> 7. Enterprise Laptops & Desktops</div>
+        <div class="solution-item"><span class="solution-dot"></span> 8. Heavy-Duty Printers & Scanners</div>
+        <div class="solution-item"><span class="solution-dot"></span> 9. Structured Networking & Fiber</div>
+        <div class="solution-item"><span class="solution-dot"></span> 10. Turnkey Boardroom Solutions</div>
+        <div class="solution-item"><span class="solution-dot"></span> 11. EPABX & IP Telephony</div>
+        <div class="solution-item"><span class="solution-dot"></span> 12. Servers & Data Center Racks</div>
+        <div class="solution-item"><span class="solution-dot"></span> 13. Online UPS & Power Backup</div>
+        <div class="solution-item"><span class="solution-dot"></span> 14. Smart Home & Office Automation</div>
+        <div class="solution-item"><span class="solution-dot"></span> 15. Certified Installation & SLA Support</div>
+      </div>
+
+      <!-- Contact Footer Card -->
+      <div class="contact-footer-card">
+        <div>
+          <div class="contact-info-title">ICON TECH PRO</div>
+          <div style="color: var(--accent-cyan); font-weight: 700; font-size: 16px;">UNIFIED SOLUTIONS SPECIALIST</div>
+          <div class="contact-lines">
+            <div>📍 Ameer Estate, 503 A Block, Sanjeeva Reddy Nagar, Hyderabad, Telangana – 500038</div>
+            <div>🌐 <a href="https://www.icontechpro.in" target="_blank" style="color: #38bdf8; text-decoration: none;">www.icontechpro.in</a></div>
+            <div>✉️ <a href="mailto:sales@icontechpro.in" style="color: #38bdf8; text-decoration: none;">sales@icontechpro.in</a></div>
+          </div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 6px;">Direct Inquiries & Bookings</div>
+          <div style="font-size: 26px; font-weight: 800; color: #fff; font-family: monospace;">+91 8099909921</div>
+          <div style="font-size: 26px; font-weight: 800; color: #38bdf8; font-family: monospace; margin-top: 4px;">+91 8099909997</div>
+          <div style="margin-top: 14px; font-size: 13px; color: #94a3b8;">
+            Partnering with HP, Dell, Epson, Canon, BenQ, ViewSonic, Hikvision, Cisco, Klipsch & more.
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Image Lightbox Modal -->
+  <div class="modal" id="imageModal" onclick="closeModal()">
+    <span class="modal-close">&times;</span>
+    <img id="modalImg" src="" alt="Poster Full View" onclick="event.stopPropagation()">
+  </div>
+
+  <script>
+    const video = document.getElementById('promoVideo');
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const muteBtn = document.getElementById('muteBtn');
+    const progressBar = document.getElementById('progressBar');
+    const progressFill = document.getElementById('progressFill');
+    const timeDisplay = document.getElementById('timeDisplay');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+    // Play / Pause toggle
+    playPauseBtn.addEventListener('click', () => {
+      if (video.paused) {
+        video.play();
+        playPauseBtn.textContent = '⏸';
+      } else {
+        video.pause();
+        playPauseBtn.textContent = '▶';
+      }
+    });
+
+    video.addEventListener('play', () => { playPauseBtn.textContent = '⏸'; });
+    video.addEventListener('pause', () => { playPauseBtn.textContent = '▶'; });
+
+    // Mute toggle
+    muteBtn.addEventListener('click', () => {
+      video.muted = !video.muted;
+      muteBtn.textContent = video.muted ? '🔇' : '🔊';
+    });
+
+    // Time update
+    video.addEventListener('timeupdate', () => {
+      const cur = video.currentTime;
+      const dur = video.duration || 32;
+      const pct = (cur / dur) * 100;
+      progressFill.style.width = pct + '%';
+
+      const curM = Math.floor(cur / 60);
+      const curS = Math.floor(cur % 60).toString().padStart(2, '0');
+      const durM = Math.floor(dur / 60);
+      const durS = Math.floor(dur % 60).toString().padStart(2, '0');
+      timeDisplay.textContent = `${curM}:${curS} / ${durM}:${durS}`;
+    });
+
+    // Seek on progress bar click
+    progressBar.addEventListener('click', (e) => {
+      const rect = progressBar.getBoundingClientRect();
+      const clickPos = (e.clientX - rect.left) / rect.width;
+      video.currentTime = clickPos * (video.duration || 32);
+    });
+
+    // Fullscreen
+    fullscreenBtn.addEventListener('click', () => {
+      if (video.requestFullscreen) {
+        video.requestFullscreen();
+      } else if (video.webkitRequestFullscreen) {
+        video.webkitRequestFullscreen();
+      }
+    });
+
+    // Seek helper for scene buttons
+    function seekTo(sec) {
+      video.currentTime = sec;
+      video.play();
+      window.scrollTo({ top: 80, behavior: 'smooth' });
+    }
+
+    // Modal
+    function openModal(src) {
+      document.getElementById('modalImg').src = src;
+      document.getElementById('imageModal').classList.add('active');
+    }
+    function closeModal() {
+      document.getElementById('imageModal').classList.remove('active');
+    }
+  </script>
+</body>
+</html>
