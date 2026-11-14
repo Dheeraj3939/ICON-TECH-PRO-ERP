@@ -37,13 +37,17 @@ import {
   updatePurchaseOrderStatus,
 } from '@/lib/actions/procurement';
 import { getOrders } from '@/lib/actions/orders';
-import { INITIAL_PRODUCTS } from '@/lib/constants/erp-data';
+import { getProducts } from '@/lib/actions/products';
 import { exportToCSV } from '@/lib/utils/export';
+import { getCurrentSessionUser } from '@/lib/actions/users';
+import { canExportCSV } from '@/lib/permissions/registry';
+import type { AuthenticatedUser } from '@/lib/auth/session';
 import type {
   Supplier,
   PurchaseOrder,
   DeliveryType,
   SalesOrder,
+  Product,
   SupplierQuoteComparisonItem,
   SupplierPerformanceSummary,
 } from '@/types/erp';
@@ -67,16 +71,18 @@ function PurchasesContent() {
   const soParam = searchParams?.get('so');
   const [filteredSo, setFilteredSo] = useState<string | null>(soParam || null);
 
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [backorders, setBackorders] = useState<UnfulfilledItem[]>([]);
   const [editingPo, setEditingPo] = useState<PurchaseOrder | null>(null);
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [activeTab, setActiveTab] = useState<'orders' | 'backorders' | 'suppliers' | 'intelligence'>('orders');
 
   // Supplier Intelligence & Quote Comparison States
   const [supplierPerformance, setSupplierPerformance] = useState<SupplierPerformanceSummary[]>([]);
-  const [comparisonProductName, setComparisonProductName] = useState('Epson Home Cinema 4K Laser Projector');
+  const [comparisonProductName, setComparisonProductName] = useState('');
   const [comparisonQty, setComparisonQty] = useState(2);
   const [quoteComparisonData, setQuoteComparisonData] = useState<{
     product_name: string;
@@ -113,16 +119,24 @@ function PurchasesContent() {
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const loadAll = async () => {
-    const [sList, poList, boList, ordersRes, perfRes] = await Promise.all([
+    const [sList, poList, boList, ordersRes, perfRes, prodRes, user] = await Promise.all([
       getSuppliers(),
       getPurchaseOrders(),
       getUnfulfilledOrderItems(),
       getOrders(),
       getSupplierPerformance(),
+      getProducts(),
+      getCurrentSessionUser(),
     ]);
     setSuppliers(sList);
     setPos(poList);
     setBackorders(boList);
+    const loadedProducts = prodRes?.products || [];
+    setProducts(loadedProducts);
+    if (!comparisonProductName && loadedProducts.length > 0) {
+      setComparisonProductName(loadedProducts[0].name);
+    }
+    setCurrentUser(user);
     if (ordersRes && ordersRes.orders) {
       setSalesOrders(ordersRes.orders);
     }
@@ -197,7 +211,7 @@ function PurchasesContent() {
     // Auto-match preferred supplier from catalog
     let matchedSupplierId = suppliers.length > 0 ? suppliers[0].id : '';
     if (items.length > 0 && items[0].sku) {
-      const catalogProd = INITIAL_PRODUCTS.find((p) => p.sku === items[0].sku);
+      const catalogProd = products.find((p) => p.sku === items[0].sku);
       if (catalogProd && catalogProd.supplier_name) {
         const prodSupplier = catalogProd.supplier_name.toLowerCase();
         const sup = suppliers.find(
@@ -243,17 +257,25 @@ function PurchasesContent() {
       setActionMessage(null);
       const supplier = suppliers.find((s) => s.id === poSupplierId) || suppliers[0];
 
-      const poItems = selectedItemsForPo.map((it) => ({
-        product_id: it.product_id || undefined,
-        product_name: it.product_name,
-        quantity: it.procurement_required_qty,
-        unit_cost: 10000, // standard baseline or editable
-        gst_rate: 18,
-        sales_order_id: it.order_id,
-        sales_order_item_id: it.item_id,
-        customer_name: it.customer_name,
-        order_number: it.order_number,
-      }));
+      const poItems = selectedItemsForPo.map((it) => {
+        const matchedProduct = products.find(
+          (p) =>
+            (it.product_id && p.id === it.product_id) ||
+            (it.sku && p.sku === it.sku) ||
+            p.name.toLowerCase() === it.product_name.toLowerCase()
+        );
+        return {
+          product_id: it.product_id || matchedProduct?.id || undefined,
+          product_name: it.product_name,
+          quantity: it.procurement_required_qty,
+          unit_cost: Number(matchedProduct?.purchase_price || matchedProduct?.selling_price || 0),
+          gst_rate: matchedProduct?.gst_rate ?? 18,
+          sales_order_id: it.order_id,
+          sales_order_item_id: it.item_id,
+          customer_name: it.customer_name,
+          order_number: it.order_number,
+        };
+      });
 
       const res = await createPurchaseOrder({
         supplier_id: supplier?.id,
@@ -342,16 +364,21 @@ function PurchasesContent() {
   };
 
   const handleExportCSV = () => {
-    exportToCSV('ICON_Purchase_Orders', pos, [
-      { key: 'po_number', label: 'PO #' },
-      { key: 'supplier_name', label: 'Supplier' },
-      { key: 'order_date', label: 'Order Date' },
-      { key: 'delivery_type', label: 'Delivery Mode' },
-      { key: 'consignee_name', label: 'Consignee' },
-      { key: 'total_amount', label: 'Total Amount (₹)' },
-      { key: 'status', label: 'Status' },
-      { key: 'created_by_name', label: 'Issued By' },
-    ]);
+    exportToCSV(
+      'ICON_Purchase_Orders',
+      pos,
+      [
+        { key: 'po_number', label: 'PO #' },
+        { key: 'supplier_name', label: 'Supplier' },
+        { key: 'order_date', label: 'Order Date' },
+        { key: 'delivery_type', label: 'Delivery Mode' },
+        { key: 'consignee_name', label: 'Consignee' },
+        { key: 'total_amount', label: 'Total Amount (₹)' },
+        { key: 'status', label: 'Status' },
+        { key: 'created_by_name', label: 'Issued By' },
+      ],
+      currentUser?.role
+    );
   };
 
   return (
@@ -373,14 +400,16 @@ function PurchasesContent() {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
-          >
-            <Download className="w-4 h-4 text-slate-500" />
-            <span>Export CSV</span>
-          </button>
+          {canExportCSV(currentUser?.role) && (
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
         </div>
       </div>
 

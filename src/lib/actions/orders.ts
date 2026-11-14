@@ -1,13 +1,13 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { findByIdOrCode, isUuid, sanitizeSearchTerm, sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { INITIAL_ORDERS } from '@/lib/constants/erp-data';
 import { getNextOrderNumber } from '@/lib/utils/sequence';
 import { getProducts } from '@/lib/actions/products';
-import { requireRole } from '@/lib/auth/session';
+import { requireRole, requireAuth } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import type {
   SalesOrder,
@@ -38,31 +38,87 @@ export async function getOrdersStore(): Promise<SalesOrder[]> {
   return getInternalOrdersStore();
 }
 
+function hydrateOrderRow(row: any): SalesOrder {
+  const items: SalesOrderItem[] = Array.isArray(row.items) ? row.items : [];
+  let inStock = 0;
+  let poRequired = 0;
+  for (const it of items) {
+    if (it.procurement_status === 'IN_OFFICE_STOCK') {
+      inStock++;
+    } else {
+      poRequired++;
+    }
+  }
+
+  return {
+    ...row,
+    confirmation_reference: row.confirmation_ref ?? row.confirmation_reference,
+    confirmed_by_name: row.confirmed_by_person ?? row.confirmed_by_name,
+    confirmation_date: row.confirmed_at ?? row.confirmation_date,
+    items,
+    procurement_summary: row.procurement_summary || {
+      total_items: items.length,
+      in_stock: inStock,
+      po_required: poRequired,
+      fulfilled: inStock,
+    },
+  } as SalesOrder;
+}
+
+async function findOrderRecord(idOrNumber: string): Promise<SalesOrder | null> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const row = await findByIdOrCode<any>(
+        admin,
+        'sales_orders',
+        idOrNumber,
+        'order_number',
+        '*, items:sales_order_items(*)'
+      );
+      if (row) return hydrateOrderRow(row);
+      return null;
+    } catch (err) {
+      console.warn('Supabase findOrderRecord fallback:', err);
+    }
+  }
+
+  const store = getInternalOrdersStore();
+  return store.find((o) => o.id === idOrNumber || o.order_number === idOrNumber) || null;
+}
+
 export async function getOrders(filters?: {
   status?: string;
   search?: string;
+  customer_id?: string;
 }): Promise<{ orders: SalesOrder[]; total: number }> {
+  await requireAuth();
   const store = getInternalOrdersStore();
 
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('sales_orders').select('*, items:sales_order_items(*)', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('sales_orders').select('*, items:sales_order_items(*)', { count: 'exact' });
 
       if (filters?.status && filters.status !== 'ALL') {
         query = query.eq('status', filters.status);
       }
+      if (filters?.customer_id) {
+        query = query.eq('customer_id', filters.customer_id);
+      }
       if (filters?.search) {
-        const s = filters.search.trim();
-        query = query.or(`order_number.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+        const s = sanitizeSearchTerm(filters.search);
+        if (s) {
+          query = query.or(`order_number.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+        }
       }
 
       query = query.order('created_at', { ascending: false });
       const { data, error, count } = await query;
 
       if (!error && data) {
-        return { orders: data as SalesOrder[], total: count ?? data.length };
+        return { orders: data.map(hydrateOrderRow), total: count ?? data.length };
       }
     } catch (err) {
       console.warn('Supabase orders query failed, using store:', err);
@@ -72,6 +128,9 @@ export async function getOrders(filters?: {
   let filtered = [...store];
   if (filters?.status && filters.status !== 'ALL') {
     filtered = filtered.filter((o) => o.status === filters.status);
+  }
+  if (filters?.customer_id) {
+    filtered = filtered.filter((o) => o.customer_id === filters.customer_id);
   }
   if (filters?.search) {
     const s = filters.search.toLowerCase();
@@ -87,25 +146,8 @@ export async function getOrders(filters?: {
 }
 
 export async function getSalesOrderById(id: string): Promise<SalesOrder | null> {
-  const store = getInternalOrdersStore();
-  const found = store.find((o) => o.id === id || o.order_number === id);
-  if (found) return found;
-
-  if (await isSupabaseAvailable()) {
-    try {
-      const supabase = await createClient();
-      const { data, error } = await supabase
-        .from('sales_orders')
-        .select('*, items:sales_order_items(*)')
-        .or(`id.eq.${id},order_number.eq.${id}`)
-        .maybeSingle();
-
-      if (!error && data) return data as SalesOrder;
-    } catch (err) {
-      console.warn('Supabase getSalesOrderById fallback:', err);
-    }
-  }
-  return null;
+  await requireAuth();
+  return findOrderRecord(id);
 }
 
 /**
@@ -256,14 +298,25 @@ export async function createSalesOrder(payload: {
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
+        let resolvedCustomerId = sanitizeUuid(newOrder.customer_id);
+        if (!resolvedCustomerId && newOrder.customer_id) {
+          const custRow = await findByIdOrCode<{ id: string }>(admin, 'customers', newOrder.customer_id, 'customer_code', 'id');
+          resolvedCustomerId = custRow?.id || null;
+        }
+        let resolvedQuotationId = sanitizeUuid(newOrder.quotation_id);
+        if (!resolvedQuotationId && newOrder.quotation_number) {
+          const quoRow = await findByIdOrCode<{ id: string }>(admin, 'quotations', newOrder.quotation_number, 'quotation_number', 'id');
+          resolvedQuotationId = quoRow?.id || null;
+        }
+
         const { data: dbOrder, error: orderErr } = await admin
           .from('sales_orders')
           .insert({
             order_number: newOrder.order_number,
             entity_code: newOrder.entity_code,
-            quotation_id: newOrder.quotation_id || null,
+            quotation_id: resolvedQuotationId,
             quotation_number: newOrder.quotation_number || null,
-            customer_id: newOrder.customer_id,
+            customer_id: resolvedCustomerId || newOrder.customer_id,
             customer_name: newOrder.customer_name,
             company_name: newOrder.company_name || null,
             salesperson_name: newOrder.salesperson_name,
@@ -276,16 +329,19 @@ export async function createSalesOrder(payload: {
             place_of_supply: newOrder.place_of_supply,
             customer_billing_state: newOrder.customer_billing_state,
             customer_po_reference: newOrder.customer_po_reference || null,
+            procurement_summary: newOrder.procurement_summary,
           })
           .select()
           .single();
 
         if (!orderErr && dbOrder) {
           newOrder.id = dbOrder.id;
+          if (resolvedCustomerId) newOrder.customer_id = resolvedCustomerId;
+          if (resolvedQuotationId) newOrder.quotation_id = resolvedQuotationId;
 
           const itemRows = processedItems.map((it) => ({
-            order_id: dbOrder.id,
-            product_id: it.product_id || null,
+            sales_order_id: dbOrder.id,
+            product_id: sanitizeUuid(it.product_id),
             sku: it.sku || null,
             product_name: it.product_name,
             quantity: it.quantity,
@@ -302,7 +358,17 @@ export async function createSalesOrder(payload: {
             fulfilled_quantity: it.fulfilled_quantity,
           }));
 
-          await admin.from('sales_order_items').insert(itemRows);
+          const { data: insertedItems, error: itemErr } = await admin
+            .from('sales_order_items')
+            .insert(itemRows)
+            .select('*');
+          if (!itemErr && Array.isArray(insertedItems)) {
+            newOrder.items = insertedItems as SalesOrderItem[];
+          } else if (itemErr) {
+            console.warn('Supabase sales_order_items insert error:', itemErr.message);
+          }
+        } else if (orderErr) {
+          console.warn('Supabase sales_order insert error:', orderErr.message);
         }
       } catch (dbErr) {
         console.warn('Supabase sales_order insert fallback to store:', dbErr);
@@ -317,6 +383,33 @@ export async function createSalesOrder(payload: {
       module: 'ORDERS',
       details: `Created Sales Order ${orderNumber} for ${newOrder.customer_name} (Total: ₹${newOrder.total_amount}, Material: ${newOrder.material_status})`,
     });
+
+    // Auto-enqueue order confirmation email to customer
+    try {
+      let custEmail: string | undefined;
+      if (await isSupabaseAvailable()) {
+        const admin = createAdminClient();
+        const { data: cData } = await admin.from('customers').select('email').eq('id', newOrder.customer_id).maybeSingle();
+        custEmail = cData?.email;
+      }
+      if (custEmail) {
+        const { enqueueAutomatedEmail, processEmailQueue } = await import('@/lib/actions/email-automation');
+        await enqueueAutomatedEmail({
+          trigger_type: 'ORDER_CONFIRMATION',
+          recipient_type: 'CUSTOMER',
+          recipient_email: custEmail,
+          recipient_name: newOrder.customer_name,
+          entity_type: 'SALES_ORDER',
+          entity_id: newOrder.id,
+          entity_number: newOrder.order_number,
+          custom_subject: `Order Confirmation: ${newOrder.order_number} - ICON TECH PRO`,
+          custom_body: `<p>Dear ${newOrder.customer_name},</p><p>We are pleased to confirm receipt of your order <strong>${newOrder.order_number}</strong>.</p><p>Order Value: <strong>₹${Number(newOrder.total_amount).toLocaleString('en-IN')}</strong><br>Status: <strong>Confirmed & Scheduled for Fulfillment</strong></p><p>Regards,<br><strong>ICON TECH PRO Operations Team</strong><br>Hyderabad, Telangana</p>`,
+        });
+        processEmailQueue().catch(() => {});
+      }
+    } catch (e) {
+      console.warn('Order confirmation email trigger warning:', e);
+    }
 
     revalidatePath('/dashboard/sales-orders');
     revalidatePath('/dashboard/purchases');
@@ -347,7 +440,14 @@ export async function updateOrderStatus(
     if (isOnline) {
       try {
         const admin = createAdminClient();
-        await admin.from('sales_orders').update(updates).or(`id.eq.${id},order_number.eq.${id}`);
+        const dbTarget = await findByIdOrCode<{ id: string }>(admin, 'sales_orders', id, 'order_number', 'id');
+        if (dbTarget) {
+          await admin.from('sales_orders').update(updates).eq('id', dbTarget.id);
+        } else if (isUuid(id)) {
+          await admin.from('sales_orders').update(updates).eq('id', id);
+        } else {
+          await admin.from('sales_orders').update(updates).eq('order_number', id);
+        }
       } catch (err) {
         console.warn('Supabase updateOrderStatus failed:', err);
       }
@@ -400,8 +500,7 @@ export async function allocateMultiDistributorStock(
       return { success: false, error: 'At least one allocation split must be provided' };
     }
 
-    const store = getInternalOrdersStore();
-    const order = store.find((o) => o.id === orderId || o.order_number === orderId);
+    const order = await findOrderRecord(orderId);
     if (!order) {
       return { success: false, error: `Sales Order ${orderId} not found` };
     }
@@ -504,6 +603,7 @@ export async function allocateMultiDistributorStock(
           .from('sales_orders')
           .update({
             material_status: order.material_status,
+            procurement_summary: order.procurement_summary,
           })
           .eq('id', order.id);
       } catch (dbErr) {
@@ -545,9 +645,7 @@ export async function recordCustomerConfirmation(
 ): Promise<{ success: boolean; data?: SalesOrder; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
-    const store = getInternalOrdersStore();
-
-    const order = store.find((o) => o.id === orderId || o.order_number === orderId);
+    const order = await findOrderRecord(orderId);
     if (!order) {
       return { success: false, error: 'Sales order not found' };
     }
@@ -560,6 +658,16 @@ export async function recordCustomerConfirmation(
     order.confirmation_attachment_url = payload.confirmation_attachment_url;
     order.confirmation_notes = payload.confirmation_notes;
 
+    const cached = getInternalOrdersStore().find((o) => o.id === order.id || o.order_number === order.order_number);
+    if (cached) {
+      cached.confirmation_type = payload.confirmation_type;
+      cached.confirmation_reference = payload.confirmation_reference;
+      cached.confirmed_by_name = payload.confirmed_by_name;
+      cached.confirmation_date = nowIso;
+      cached.confirmation_attachment_url = payload.confirmation_attachment_url;
+      cached.confirmation_notes = payload.confirmation_notes;
+    }
+
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
@@ -567,13 +675,13 @@ export async function recordCustomerConfirmation(
           .from('sales_orders')
           .update({
             confirmation_type: payload.confirmation_type,
-            confirmation_reference: payload.confirmation_reference,
-            confirmed_by_name: payload.confirmed_by_name,
-            confirmation_date: nowIso,
+            confirmation_ref: payload.confirmation_reference,
+            confirmed_by_person: payload.confirmed_by_name,
+            confirmed_at: nowIso,
             confirmation_attachment_url: payload.confirmation_attachment_url || null,
             confirmation_notes: payload.confirmation_notes || null,
           })
-          .or(`id.eq.${order.id},order_number.eq.${order.order_number}`);
+          .eq('id', order.id);
       } catch (err) {
         console.warn('Supabase customer confirmation update fallback:', err);
       }
@@ -605,9 +713,7 @@ export async function updateSalesOrderStatus(
 ): Promise<{ success: boolean; data?: SalesOrder; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
-    const store = getInternalOrdersStore();
-
-    const order = store.find((o) => o.id === orderId || o.order_number === orderId);
+    const order = await findOrderRecord(orderId);
     if (!order) {
       return { success: false, error: `Sales order ${orderId} not found` };
     }
@@ -618,6 +724,8 @@ export async function updateSalesOrderStatus(
 
     const previousStatus = order.status;
     order.status = newStatus;
+    const cached = getInternalOrdersStore().find((o) => o.id === order.id || o.order_number === order.order_number);
+    if (cached) cached.status = newStatus;
 
     if (await isSupabaseAvailable()) {
       try {
@@ -657,15 +765,15 @@ export async function updateFulfillmentStatus(
 ): Promise<{ success: boolean; data?: SalesOrder; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Office Assistant', 'BDM']);
-    const store = getInternalOrdersStore();
-
-    const order = store.find((o) => o.id === orderId || o.order_number === orderId);
+    const order = await findOrderRecord(orderId);
     if (!order) {
       return { success: false, error: `Sales order ${orderId} not found` };
     }
 
     const previousStatus = order.fulfillment_status || 'Pending Procurement';
     order.fulfillment_status = newFulfillmentStatus;
+    const cached = getInternalOrdersStore().find((o) => o.id === order.id || o.order_number === order.order_number);
+    if (cached) cached.fulfillment_status = newFulfillmentStatus;
 
     if (await isSupabaseAvailable()) {
       try {
@@ -710,8 +818,7 @@ export async function updateSalesOrder(
 ): Promise<{ success: boolean; data?: SalesOrder; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM']);
-    const store = getInternalOrdersStore();
-    const order = store.find((o) => o.id === orderId || o.order_number === orderId);
+    const order = await findOrderRecord(orderId);
 
     if (!order) {
       return { success: false, error: 'Sales Order not found' };
@@ -729,6 +836,14 @@ export async function updateSalesOrder(
     if (values.place_of_supply !== undefined) order.place_of_supply = values.place_of_supply;
     if (values.customer_billing_state !== undefined) order.customer_billing_state = values.customer_billing_state;
 
+    const cached = getInternalOrdersStore().find((o) => o.id === order.id || o.order_number === order.order_number);
+    if (cached) {
+      cached.customer_po_reference = order.customer_po_reference;
+      cached.expected_delivery = order.expected_delivery;
+      cached.place_of_supply = order.place_of_supply;
+      cached.customer_billing_state = order.customer_billing_state;
+    }
+
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
@@ -740,7 +855,7 @@ export async function updateSalesOrder(
             place_of_supply: order.place_of_supply,
             customer_billing_state: order.customer_billing_state,
           })
-          .or(`id.eq.${order.id},order_number.eq.${order.order_number}`);
+          .eq('id', order.id);
       } catch (err) {
         console.warn('Supabase updateSalesOrder fallback:', err);
       }

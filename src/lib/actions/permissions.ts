@@ -67,6 +67,79 @@ function getMatrixStore(): RolePermissionMatrix {
   return matrix;
 }
 
+async function getHydratedMatrix(): Promise<RolePermissionMatrix> {
+  const matrix = getMatrixStore();
+  if (!(await isSupabaseAvailable())) {
+    return matrix;
+  }
+  try {
+    const admin = createAdminClient();
+    const { data: roleRows } = await admin.from('roles').select('id, role_name');
+    const { data: rpRows, error } = await admin
+      .from('role_permissions')
+      .select('role_id, permission_id, roles(role_name), permissions(module, action)');
+
+    if (error || !rpRows || rpRows.length === 0) {
+      return matrix;
+    }
+
+    const actions: PermissionAction[] = ['view', 'create', 'edit', 'delete', 'approve', 'export'];
+    const controlledModules = getControlledModules();
+
+    // Reset all known DB roles before applying DB-persisted toggles so revocations survive restarts
+    for (const r of roleRows || []) {
+      const rName = (r as any).role_name as string;
+      if (!rName) continue;
+      if (!matrix[rName]) matrix[rName] = {} as any;
+      for (const mod of controlledModules) {
+        matrix[rName][mod.name] = {
+          view: false,
+          create: false,
+          edit: false,
+          delete: false,
+          approve: false,
+          export: false,
+        };
+      }
+      // Also reset any modules already in memory for that role
+      for (const modKey of Object.keys(matrix[rName])) {
+        const blank: Record<PermissionAction, boolean> = {
+          view: false,
+          create: false,
+          edit: false,
+          delete: false,
+          approve: false,
+          export: false,
+        };
+        for (const a of actions) blank[a] = false;
+        matrix[rName][modKey as ERPModule] = blank;
+      }
+    }
+
+    for (const row of rpRows as any[]) {
+      const rName = row.roles?.role_name;
+      const mod = row.permissions?.module as ERPModule | undefined;
+      const act = row.permissions?.action as PermissionAction | undefined;
+      if (!rName || !mod || !act) continue;
+      if (!matrix[rName]) matrix[rName] = {} as any;
+      if (!matrix[rName][mod]) {
+        matrix[rName][mod] = {
+          view: false,
+          create: false,
+          edit: false,
+          delete: false,
+          approve: false,
+          export: false,
+        };
+      }
+      matrix[rName][mod][act] = true;
+    }
+  } catch (err) {
+    console.warn('Supabase getHydratedMatrix warning:', err);
+  }
+  return matrix;
+}
+
 /**
  * Retrieve all configured roles with active user counts.
  * Restricted to Managing Director and Admin / BDM.
@@ -166,14 +239,24 @@ export async function createCustomRole(payload: {
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin.from('roles').insert([
-          {
-            id: newRole.id,
-            role_name: newRole.role_name,
-            description: newRole.description,
-            is_system: false,
-          },
-        ]);
+        const { data: insertedRole, error: insErr } = await admin
+          .from('roles')
+          .insert([
+            {
+              role_name: newRole.role_name,
+              description: newRole.description,
+              is_system: false,
+            },
+          ])
+          .select('id')
+          .maybeSingle();
+
+        if (insErr) {
+          return { success: false, error: `Failed to create role: ${insErr.message}` };
+        }
+        if (insertedRole?.id) {
+          newRole.id = insertedRole.id;
+        }
       } catch (dbErr) {
         console.warn('Supabase createCustomRole failed:', dbErr);
       }
@@ -262,7 +345,7 @@ export async function deleteRole(roleId: string): Promise<{ success: boolean; er
  */
 export async function getRolePermissionMatrix(): Promise<RolePermissionMatrix> {
   await requireRole(['Managing Director', 'Admin / BDM']);
-  return getMatrixStore();
+  return getHydratedMatrix();
 }
 
 /**
@@ -309,6 +392,44 @@ export async function updateRolePermission(
 
     const previousValue = matrix[roleName][module][action];
     matrix[roleName][module][action] = enabled;
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const { data: roleRow } = await admin.from('roles').select('id').eq('role_name', roleName).maybeSingle();
+        let { data: permRow } = await admin
+          .from('permissions')
+          .select('id')
+          .eq('module', module)
+          .eq('action', action)
+          .maybeSingle();
+
+        if (!permRow && enabled) {
+          const { data: createdPerm } = await admin
+            .from('permissions')
+            .insert({ module, action, description: `Allows ${action} operations on ${module}` })
+            .select('id')
+            .maybeSingle();
+          permRow = createdPerm;
+        }
+
+        if (roleRow?.id && permRow?.id) {
+          if (enabled) {
+            await admin
+              .from('role_permissions')
+              .upsert({ role_id: roleRow.id, permission_id: permRow.id }, { onConflict: 'role_id,permission_id' });
+          } else {
+            await admin
+              .from('role_permissions')
+              .delete()
+              .eq('role_id', roleRow.id)
+              .eq('permission_id', permRow.id);
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Supabase updateRolePermission warning:', dbErr);
+      }
+    }
 
     await logAuditEvent({
       userName: actor.name,
@@ -358,6 +479,64 @@ export async function updateFullRoleMatrix(
 
     matrix[roleName] = permissions;
 
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const { data: roleRow } = await admin.from('roles').select('id').eq('role_name', roleName).maybeSingle();
+        if (roleRow?.id) {
+          const desiredPairs: Array<{ module: string; action: PermissionAction }> = [];
+          const actions: PermissionAction[] = ['view', 'create', 'edit', 'delete', 'approve', 'export'];
+          for (const [mod, modPerms] of Object.entries(permissions)) {
+            if (!modPerms) continue;
+            for (const act of actions) {
+              if (modPerms[act]) {
+                desiredPairs.push({ module: mod, action: act });
+              }
+            }
+          }
+
+          const { data: existingPerms } = await admin.from('permissions').select('id, module, action');
+          const permMap = new Map<string, string>();
+          for (const p of existingPerms || []) {
+            permMap.set(`${p.module}::${p.action}`, p.id);
+          }
+
+          const missingPerms = desiredPairs
+            .filter((d) => !permMap.has(`${d.module}::${d.action}`))
+            .map((d) => ({
+              module: d.module,
+              action: d.action,
+              description: `Allows ${d.action} operations on ${d.module}`,
+            }));
+
+          if (missingPerms.length > 0) {
+            const { data: insertedPerms } = await admin
+              .from('permissions')
+              .upsert(missingPerms, { onConflict: 'module,action' })
+              .select('id, module, action');
+            for (const p of insertedPerms || []) {
+              permMap.set(`${p.module}::${p.action}`, p.id);
+            }
+          }
+
+          // Replace role_permissions atomically for this role
+          await admin.from('role_permissions').delete().eq('role_id', roleRow.id);
+          const rowsToInsert = desiredPairs
+            .map((d) => permMap.get(`${d.module}::${d.action}`))
+            .filter((pid): pid is string => Boolean(pid))
+            .map((permission_id) => ({ role_id: roleRow.id, permission_id }));
+
+          if (rowsToInsert.length > 0) {
+            await admin
+              .from('role_permissions')
+              .upsert(rowsToInsert, { onConflict: 'role_id,permission_id' });
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Supabase updateFullRoleMatrix warning:', dbErr);
+      }
+    }
+
     await logAuditEvent({
       userName: actor.name,
       action: 'PERMISSION_MATRIX_UPDATED',
@@ -381,7 +560,7 @@ export async function hasRolePermission(
   module: ERPModule,
   action: PermissionAction
 ): Promise<boolean> {
-  const matrix = getMatrixStore();
+  const matrix = await getHydratedMatrix();
   const rolePerms = matrix[roleName];
   if (!rolePerms) return false;
   const modPerms = rolePerms[module];
@@ -394,6 +573,36 @@ export async function hasRolePermission(
  */
 export async function getUserOverrides(userId?: string): Promise<UserPermissionOverride[]> {
   const store = getUserOverridesStore();
+
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin.from('user_permission_overrides').select('*').order('granted_at', { ascending: false });
+      if (userId) {
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+        if (isUUID) {
+          query = query.eq('user_id', userId);
+        }
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        return data.map((d: any) => ({
+          id: d.id,
+          userId: d.user_id,
+          module: d.module as ERPModule,
+          action: d.action as PermissionAction,
+          granted: Boolean(d.granted),
+          reason: d.reason,
+          grantedBy: d.granted_by,
+          grantedAt: d.granted_at,
+          startDate: d.start_date || undefined,
+          endDate: d.end_date || undefined,
+          isTemporary: Boolean(d.is_temporary),
+        }));
+      }
+    } catch {}
+  }
+
   if (userId) {
     return store.filter((o) => o.userId === userId);
   }
@@ -462,6 +671,30 @@ export async function setUserPermissionOverride(payload: {
       store.push(overrideItem);
     }
 
+    if (await isSupabaseAvailable()) {
+      try {
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.userId);
+        if (isUUID) {
+          const admin = createAdminClient();
+          await admin.from('user_permission_overrides').upsert({
+            id: overrideItem.id,
+            user_id: payload.userId,
+            module: overrideItem.module,
+            action: overrideItem.action,
+            granted: overrideItem.granted,
+            reason: overrideItem.reason,
+            granted_by: overrideItem.grantedBy,
+            granted_at: overrideItem.grantedAt,
+            start_date: overrideItem.startDate || null,
+            end_date: overrideItem.endDate || null,
+            is_temporary: overrideItem.isTemporary,
+          });
+        }
+      } catch (dbErr) {
+        console.warn('Supabase setUserPermissionOverride warning:', dbErr);
+      }
+    }
+
     await logAuditEvent({
       userName: actor.name,
       action: payload.isTemporary
@@ -499,18 +732,72 @@ export async function removeUserPermissionOverride(
   try {
     const actor = await requireRole(['Managing Director', 'Admin / BDM']);
     const store = getUserOverridesStore();
+    let removed: UserPermissionOverride | undefined;
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(overrideIdOrUserId);
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        if (module && action && isUUID) {
+          const { data } = await admin
+            .from('user_permission_overrides')
+            .delete()
+            .eq('user_id', overrideIdOrUserId)
+            .eq('module', module)
+            .eq('action', action)
+            .select()
+            .maybeSingle();
+          if (data) {
+            removed = {
+              id: data.id,
+              userId: data.user_id,
+              module: data.module as ERPModule,
+              action: data.action as PermissionAction,
+              granted: Boolean(data.granted),
+              reason: data.reason,
+              grantedBy: data.granted_by,
+              grantedAt: data.granted_at,
+            };
+          }
+        } else if (isUUID) {
+          const { data } = await admin
+            .from('user_permission_overrides')
+            .delete()
+            .eq('id', overrideIdOrUserId)
+            .select()
+            .maybeSingle();
+          if (data) {
+            removed = {
+              id: data.id,
+              userId: data.user_id,
+              module: data.module as ERPModule,
+              action: data.action as PermissionAction,
+              granted: Boolean(data.granted),
+              reason: data.reason,
+              grantedBy: data.granted_by,
+              grantedAt: data.granted_at,
+            };
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Supabase removeUserPermissionOverride warning:', dbErr);
+      }
+    }
+
     let idx = -1;
     if (module && action) {
       idx = store.findIndex((o) => o.userId === overrideIdOrUserId && o.module === module && o.action === action);
     } else {
       idx = store.findIndex((o) => o.id === overrideIdOrUserId);
     }
-    if (idx === -1) {
-      return { success: false, error: 'Override record not found.' };
+    if (idx !== -1) {
+      if (!removed) removed = store[idx];
+      store.splice(idx, 1);
     }
 
-    const removed = store[idx];
-    store.splice(idx, 1);
+    if (!removed) {
+      return { success: false, error: 'Override record not found.' };
+    }
 
     await logAuditEvent({
       userName: actor.name,
@@ -535,8 +822,8 @@ export async function getUserEffectivePermissions(
   userId: string,
   roleName: string
 ): Promise<Record<string, Record<PermissionAction, EffectivePermissionInfo>>> {
-  const matrix = getMatrixStore();
-  const overrides = getUserOverridesStore().filter((o) => o.userId === userId);
+  const matrix = await getHydratedMatrix();
+  const overrides = await getUserOverrides(userId);
   const rolePerms = matrix[roleName] || ({} as any);
 
   const controlledModules = getControlledModules();
@@ -612,8 +899,8 @@ export async function hasEffectivePermission(
 
   // Check individual override first if userId is available
   if (userId) {
-    const store = getUserOverridesStore();
-    const override = store.find((o) => o.userId === userId && o.module === module && o.action === action);
+    const overrides = await getUserOverrides(userId);
+    const override = overrides.find((o) => o.userId === userId && o.module === module && o.action === action);
     if (override) {
       // Check if temporary and expired
       if (override.isTemporary && override.endDate) {
@@ -639,8 +926,8 @@ export async function getModuleAccessSummary(module: ERPModule): Promise<{
   overrides: { userId: string; action: PermissionAction; granted: boolean; reason: string; isTemporary?: boolean; expiresAt?: string }[];
 }> {
   await requireRole(['Managing Director', 'Admin / BDM']);
-  const matrix = getMatrixStore();
-  const overridesStore = getUserOverridesStore();
+  const matrix = await getHydratedMatrix();
+  const overridesStore = await getUserOverrides();
 
   const rolesSummary: { role_name: string; actions: PermissionAction[] }[] = [];
   const actions: PermissionAction[] = ['view', 'create', 'edit', 'delete', 'approve', 'export'];
@@ -848,7 +1135,7 @@ export async function getExpiringTemporaryAccess(days: number = 7): Promise<{
   totalExpired: number;
 }> {
   await requireRole(['Managing Director', 'Admin / BDM']);
-  const store = getUserOverridesStore();
+  const store = await getUserOverrides();
   const now = Date.now();
   const thresholdMs = days * 24 * 60 * 60 * 1000;
 

@@ -6,6 +6,14 @@ import { createInvoiceFromOrder, recordPayment } from '@/lib/actions/billing';
 import { updateProductStock, getInventoryTransactions, getProducts } from '@/lib/actions/products';
 
 export async function GET() {
+  // Fail-closed guard: Strictly disable test execution in production environments
+  if (
+    process.env.NODE_ENV === 'production' ||
+    process.env.NEXT_PUBLIC_ERP_ENV?.trim().toUpperCase() === 'PRODUCTION'
+  ) {
+    return NextResponse.json({ error: 'Endpoint not found' }, { status: 404 });
+  }
+
   const testResults: Array<{
     name: string;
     category: string;
@@ -76,6 +84,7 @@ export async function GET() {
       customer_type: 'COMPANY',
       company_name: 'Alpha Infra Tech Pvt Ltd',
       contact_person: 'Rajesh Kumar',
+      designation: 'Managing Director',
       email: 'contact@alphainfra.com',
       phone: '9876543210',
       billing_address: 'Electronic City Phase 1, Hosur Road, Bengaluru',
@@ -92,6 +101,7 @@ export async function GET() {
       customer_type: 'COMPANY',
       company_name: 'Beta Comms Pvt Ltd',
       contact_person: 'Suresh Reddy',
+      designation: 'Director',
       email: 'contact@betacomms.com',
       phone: '9876543211',
       billing_address: 'Hitech City Phase 2, Madhapur, Hyderabad',

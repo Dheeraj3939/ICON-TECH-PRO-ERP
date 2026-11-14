@@ -15,6 +15,7 @@ import { getQuotations } from '@/lib/actions/quotations';
 import { getProducts } from '@/lib/actions/products';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
+import { requireRole } from '@/lib/auth/session';
 import type { 
   ExecutiveBriefing, 
   ExecutiveReportSchedule, 
@@ -100,6 +101,7 @@ export async function generateExecutiveBriefing(
   customReportType?: ExecutiveReportType
 ): Promise<{ success: boolean; briefing?: ExecutiveBriefing; error?: string }> {
   try {
+    await requireRole(['Managing Director', 'Admin / BDM']);
     const now = new Date();
     const periodEnd = now.toISOString();
     let periodStart = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
@@ -319,6 +321,7 @@ export async function getExecutiveBriefings(filter?: {
   schedule?: ExecutiveReportSchedule;
   limit?: number;
 }): Promise<ExecutiveBriefing[]> {
+  await requireRole(['Managing Director', 'Admin / BDM']);
   let briefings = getBriefingsStore();
   if (filter?.schedule) {
     briefings = briefings.filter((b) => b.schedule === filter.schedule);
@@ -331,6 +334,7 @@ export async function getExecutiveBriefings(filter?: {
  * Retrieve a specific executive briefing by ID
  */
 export async function getExecutiveBriefingById(id: string): Promise<ExecutiveBriefing | null> {
+  await requireRole(['Managing Director', 'Admin / BDM']);
   const briefings = getBriefingsStore();
   return briefings.find((b) => b.id === id) || null;
 }
@@ -339,6 +343,7 @@ export async function getExecutiveBriefingById(id: string): Promise<ExecutiveBri
  * Retrieve all executive schedule configurations
  */
 export async function getExecutiveScheduleConfigs(): Promise<ExecutiveScheduleConfig[]> {
+  await requireRole(['Managing Director', 'Admin / BDM']);
   return getScheduleConfigsStore();
 }
 
@@ -349,6 +354,7 @@ export async function updateExecutiveScheduleConfig(
   id: string,
   updates: Partial<ExecutiveScheduleConfig>
 ): Promise<{ success: boolean; config?: ExecutiveScheduleConfig; error?: string }> {
+  await requireRole(['Managing Director', 'Admin / BDM']);
   const configs = getScheduleConfigsStore();
   const index = configs.findIndex((c) => c.id === id);
   if (index === -1) {

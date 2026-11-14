@@ -4,6 +4,7 @@ export type BusinessEntity = 'ICON_TECH_PRO';
 
 export type UserRole =
   | 'Managing Director'
+  | 'Admin'
   | 'Admin / BDM'
   | 'BDM'
   | 'Sales Executive'
@@ -57,10 +58,22 @@ export interface SiteVisitDetails {
   id?: string;
   visitNumber?: string;
   required: boolean;
+  customer_id?: string;
+  customer_name?: string;
+  company_name?: string;
+  enquiry_id?: string;
+  enquiry_number?: string;
+  contact_person?: string;
+  contact_phone?: string;
+  salesperson_name?: string;
+  project_category?: string;
+  other_project_description?: string;
+  purpose?: string;
   siteAddress?: string;
   roomType?: string;
   measurements?: string;
   scheduledDate?: string;
+  scheduled_time?: string;
   completedDate?: string;
   assignedTechnician?: string;
   status?: 'SCHEDULED' | 'COMPLETED' | 'RESCHEDULED' | 'CANCELLED';
@@ -71,6 +84,10 @@ export interface SiteVisitDetails {
   customer_expectations?: string;
   recommended_solution?: string;
   follow_up_actions?: string;
+  next_action?: string;
+  follow_up_date?: string;
+  technical_evaluation_id?: string;
+  technical_evaluation_status?: string;
 }
 
 export interface EnquiryNote {
@@ -227,6 +244,114 @@ export interface QuotationItem {
   internal_remarks?: string;
   target_margin_pct?: number;
   target_markup_pct?: number;
+  brand?: string;
+  model?: string;
+  specs?: string;
+  key_specifications?: string;
+  description?: string;
+  customer_description?: string;
+  spec_record_id?: string;
+  spec_source_name?: string;
+  spec_source_url?: string;
+  datasheet_url?: string;
+  section_id?: string;
+  is_expanded?: boolean;
+  verification_status?: VerificationStatus;
+  source_confidence?: SourceConfidenceLevel;
+}
+
+export type VerificationStatus =
+  | 'EXACT_MODEL_VERIFIED'
+  | 'MULTI_SOURCE_VERIFIED'
+  | 'REVIEW_REQUIRED'
+  | 'PARTIAL_MATCH'
+  | 'NO_RELIABLE_MATCH';
+
+export type SourceConfidenceLevel = 1 | 2 | 3 | 4 | 5 | 6;
+
+export interface ResearchSource {
+  source_name: string;
+  source_url: string;
+  source_type:
+    | 'MANUFACTURER_PRODUCT_PAGE'
+    | 'MANUFACTURER_DATASHEET'
+    | 'REGIONAL_MANUFACTURER'
+    | 'DISTRIBUTOR_RESELLER'
+    | 'TECHNICAL_DATABASE'
+    | 'GENERAL_WEB';
+  confidence_level: SourceConfidenceLevel;
+  verified: boolean;
+  evidence_snippet?: string;
+  conflict_notes?: string;
+}
+
+export interface ProductResearchResult {
+  found: boolean;
+  verification_status: VerificationStatus;
+  brand: string;
+  model: string;
+  product_name: string;
+  category?: string;
+  key_specifications: string;
+  full_specifications: Record<string, string>;
+  customer_description: string;
+  sources: ResearchSource[];
+  confidence: number;
+  evidence: string[];
+  warnings: string[];
+  researched_at: string;
+  message: string;
+  // Backward compatibility with SpecificationFetchResult
+  specs?: Record<string, string>;
+  specs_text?: string;
+  description?: string;
+  source_name?: string;
+  source_url?: string;
+  retrieval_date?: string;
+  suggested_price?: number;
+  suggested_cost?: number;
+  suggested_distributor?: string;
+  hsn_sac?: string;
+  gst_rate?: number;
+  from_library?: boolean;
+}
+
+export interface SpecIntelligenceRecord {
+  id: string;
+  brand: string;
+  normalized_brand?: string;
+  model: string;
+  normalized_model?: string;
+  product_name: string;
+  category?: string;
+  subcategory?: string;
+  specifications: Record<string, string>;
+  specs_text?: string;
+  key_specifications?: string;
+  description?: string;
+  customer_description?: string;
+  source_name?: string;
+  source_url?: string;
+  datasheet_url?: string;
+  source_confidence?: SourceConfidenceLevel;
+  source_type?: string;
+  verification_status?: VerificationStatus;
+  verification_date?: string;
+  research_timestamp?: string;
+  last_verified_timestamp?: string;
+  search_aliases?: string[];
+  conflict_info?: string;
+  suggested_price?: number;
+  suggested_cost?: number;
+  suggested_distributor?: string;
+  hsn_sac?: string;
+  gst_rate?: number;
+  research_date: string;
+  created_by?: string;
+  updated_by?: string;
+  created_at?: string;
+  updated_at?: string;
+  from_library?: boolean;
 }
 
 export type QuotationStatus =
@@ -264,6 +389,27 @@ export interface QuotationVersion {
   notes?: string;
 }
 
+export type QuotationFormatType =
+  | 'STANDARD'
+  | 'HOME_THEATER'
+  | 'CONFERENCE_ROOM'
+  | 'CCTV_SURVEILLANCE'
+  | 'CCTV'
+  | 'NETWORKING'
+  | 'AV_SOLUTION'
+  | 'AV_PROJECTOR'
+  | 'AV'
+  | 'AMC_SERVICE'
+  | 'INTERACTIVE_DISPLAY'
+  | 'PRINTER_SOLUTION'
+  | 'LAPTOP_DESKTOP'
+  | 'SERVER_STORAGE'
+  | 'ACCESS_CONTROL'
+  | 'AUDIO_SYSTEM'
+  | 'CUSTOM_PROJECT'
+  | 'CUSTOM_MIXED'
+  | 'DETAILED_PROJECT';
+
 export interface Quotation {
   id: string;
   quotation_number: string; // e.g. ICON-EST-1099 or QT/2026-27/0001
@@ -291,9 +437,12 @@ export interface Quotation {
   place_of_supply?: string;
   dispatch_from?: string;
   items: QuotationItem[];
-  quotation_format?: 'STANDARD' | 'DETAILED_PROJECT';
+  quotation_format?: QuotationFormatType;
+  format_configuration?: string;
   project_sections?: ProjectSection[];
   is_detailed_project?: boolean;
+  is_gst_inclusive?: boolean;
+  pricing_mode?: 'EXCLUSIVE' | 'INCLUSIVE';
   subtotal: number;
   total_discount: number;
   taxable_amount: number;
@@ -2110,9 +2259,140 @@ export interface ProjectMilestone {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// OPEN FILE MANAGEMENT — 3 INDEPENDENT STATUS DIMENSIONS & BUSINESS LIFECYCLE
+// ---------------------------------------------------------------------------
+export type FileSalesStatus =
+  | 'New Lead'
+  | 'Enquiry'
+  | 'Follow-up'
+  | 'Site Visit'
+  | 'Technical Evaluation'
+  | 'Quotation Preparation'
+  | 'Quotation Sent'
+  | 'Negotiation'
+  | 'Customer PO Received'
+  | 'Order Confirmed'
+  | 'Lost'
+  | 'Cancelled'
+  | 'On Hold';
+
+export type FileFulfilmentStatus =
+  | 'Not Started'
+  | 'Awaiting Procurement'
+  | 'Procurement in Progress'
+  | 'Material Received'
+  | 'Invoice Pending'
+  | 'Invoice Created'
+  | 'E-Way Bill Pending'
+  | 'Ready for Dispatch'
+  | 'Partially Dispatched'
+  | 'Dispatched'
+  | 'Installation Pending'
+  | 'Installation in Progress'
+  | 'Fulfilment Completed'
+  | 'Cancelled';
+
+export type FileFinancialStatus =
+  | 'No Financial Activity'
+  | 'Awaiting Customer Invoice'
+  | 'Partially Invoiced'
+  | 'Invoiced'
+  | 'Partially Paid'
+  | 'Payment Pending'
+  | 'Overdue'
+  | 'Advance Received'
+  | 'Unallocated Receipt'
+  | 'Refund Pending'
+  | 'Credit Note Pending'
+  | 'Disputed'
+  | 'Reconciliation Pending'
+  | 'Financially Settled'
+  | 'Closed';
+
+export type FileClosureCategory =
+  | 'Lost Enquiry'
+  | 'Cancelled Before Order'
+  | 'Cancelled Confirmed Order'
+  | 'Successfully Completed';
+
+export type FileClosureReason =
+  | 'Requirement Not Needed'
+  | 'Budget Not Approved'
+  | 'Project Cancelled Before Order'
+  | 'Competitor Selected'
+  | 'No Response'
+  | 'Requirement Postponed'
+  | 'Duplicate File'
+  | 'Other';
+
+export type FileDepartmentOwner =
+  | 'Sales'
+  | 'Accounts'
+  | 'Procurement'
+  | 'Dispatch'
+  | 'Technical'
+  | 'Executive';
+
+export interface CustomerPurchaseOrder {
+  id: string;
+  file_id: string;
+  customer_id: string;
+  po_number: string;
+  po_date: string;
+  po_value: number;
+  document_url?: string;
+  document_name?: string;
+  payment_terms: '15 Days' | '30 Days' | '45 Days' | '60 Days' | '90 Days' | string;
+  payment_trigger: 'INVOICE_DATE' | 'DELIVERY_DATE' | 'GRN' | 'ACCEPTANCE' | 'MILESTONE' | 'CUSTOM';
+  payment_trigger_date?: string;
+  delivery_terms?: string;
+  terms_conflict_flag?: boolean;
+  conflict_details?: string;
+  status: 'RECEIVED' | 'VERIFIED_BY_ACCOUNTS' | 'REVISED' | 'SUPERSEDED';
+  revisions?: Array<{
+    revision_number: number;
+    po_number: string;
+    po_value: number;
+    changed_at: string;
+    changed_by: string;
+    reason: string;
+  }>;
+  linked_invoices?: string[];
+  created_at: string;
+}
+
+export interface FileReopenRequest {
+  id: string;
+  requested_by_id: string;
+  requested_by_name: string;
+  requested_at: string;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  decided_by_id?: string;
+  decided_by_name?: string;
+  decided_at?: string;
+  rejection_reason?: string;
+}
+
+export interface FileOwnershipTransfer {
+  id: string;
+  transferred_from_id: string;
+  transferred_from_name: string;
+  transferred_to_id: string;
+  transferred_to_name: string;
+  reason: string;
+  approved_by_id: string;
+  approved_by_name: string;
+  transferred_at: string;
+}
+
 export interface Project {
   id: string;
-  project_number: string; // e.g. PRJ/2026-27/0001
+  file_id?: string;
+  project_number: string; // e.g. PRJ/2026-27/0001 or FILE-2026-0001
+  project_code?: string;
+  title?: string;
   project_name: string;
   project_type: ProjectType;
   customer_id: string;
@@ -2122,7 +2402,43 @@ export interface Project {
   quotation_id?: string;
   sales_order_id?: string;
   lead_engineer_name?: string;
-  status: ProjectStatus;
+  status: ProjectStatus; // Legacy aggregate status for backward compatibility
+
+  // Open File Management 3 Independent Status Dimensions
+  sales_status?: FileSalesStatus;
+  fulfilment_status?: FileFulfilmentStatus;
+  financial_status?: FileFinancialStatus;
+
+  // Ownership & Accountability
+  file_owner_id?: string;
+  file_owner_name?: string;
+  department_owner?: FileDepartmentOwner;
+  accounts_owner_name?: string;
+  supporting_employees?: string[];
+  ownership_history?: FileOwnershipTransfer[];
+
+  // Closure Details
+  closure_category?: FileClosureCategory;
+  closure_reason?: FileClosureReason;
+  closure_explanation?: string;
+  closed_at?: string;
+  closed_by?: string;
+  is_ready_for_closure?: boolean;
+
+  // Reopening Lifecycle (sales_request)
+  reopen_requested?: boolean;
+  reopen_requested_by?: string;
+  reopen_requested_at?: string;
+  reopen_reason?: string;
+  reopen_request?: FileReopenRequest;
+  reopen_history?: FileReopenRequest[];
+
+  // Customer PO Documents & Commercial Tracking
+  customer_po?: CustomerPurchaseOrder;
+  customer_pos?: CustomerPurchaseOrder[];
+  has_confirmed_order?: boolean;
+  has_financial_commitments?: boolean;
+
   total_project_value: number;
   total_cost: number;
   margin_pct: number;
@@ -2134,6 +2450,9 @@ export interface Project {
   created_at: string;
   updated_at?: string;
 }
+
+export type CustomerProject = Project;
+export type CustomerProjectFile = Project;
 
 export interface SupplierPriceOffer {
   id: string;

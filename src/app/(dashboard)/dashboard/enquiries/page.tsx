@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import {
   FileText,
   Plus,
@@ -35,7 +36,6 @@ import { getEnquiries, updateEnquiryStatus } from '@/lib/actions/enquiries';
 import { getEnquirySalesBrief, generateEnquirySalesBrief } from '@/lib/actions/opportunities';
 import { NewEnquiryModal } from '@/components/modals/NewEnquiryModal';
 import { EditEnquiryModal } from '@/components/modals/EditEnquiryModal';
-import { NewQuotationModal } from '@/components/modals/NewQuotationModal';
 import { STAFF_MEMBERS } from '@/lib/constants/erp-data';
 import type { Enquiry, EnquiryStatus, EnquirySalesBrief } from '@/types/erp';
 
@@ -48,7 +48,6 @@ export default function EnquiriesPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
-  const [selectedEnquiryForQuote, setSelectedEnquiryForQuote] = useState<Enquiry | null>(null);
   const [selectedEnquiryForEdit, setSelectedEnquiryForEdit] = useState<Enquiry | null>(null);
 
   // Phase C.2: AI Sales Brief & Opportunity Intelligence States
@@ -400,13 +399,13 @@ export default function EnquiriesPage() {
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          onClick={() => setSelectedEnquiryForQuote(enq)}
+                        <Link
+                          href={`/dashboard/quotations/new?enquiry_id=${enq.id}`}
                           title="Create Proposal Quotation"
-                          className="px-2 py-1 rounded-md bg-brand-50 hover:bg-brand-100 text-brand-700 font-bold transition text-[10.5px]"
+                          className="px-2 py-1 rounded-md bg-brand-50 hover:bg-brand-100 text-brand-700 font-bold transition text-[10.5px] inline-flex items-center"
                         >
                           <span>Quote</span>
-                        </button>
+                        </Link>
                       </div>
                     </td>
                   </tr>
@@ -476,14 +475,13 @@ export default function EnquiriesPage() {
                     <Edit3 className="w-3.5 h-3.5" />
                     <span>Edit</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedEnquiryForQuote(enq)}
+                  <Link
+                    href={`/dashboard/quotations/new?enquiry_id=${enq.id}`}
                     className="min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl bg-blue-600 text-white text-[10px] font-bold shadow-xs"
                   >
                     <ReceiptText className="w-3.5 h-3.5" />
                     <span>Quote</span>
-                  </button>
+                  </Link>
                 </div>
               </div>
             ))
@@ -548,29 +546,6 @@ export default function EnquiriesPage() {
         onClose={() => setSelectedEnquiryForEdit(null)}
         onSuccess={loadData}
       />
-      {selectedEnquiryForQuote && (
-        <NewQuotationModal
-          isOpen={true}
-          onClose={() => setSelectedEnquiryForQuote(null)}
-          onSuccess={loadData}
-          initialCustomer={{
-            id: selectedEnquiryForQuote.customer_id,
-            name: selectedEnquiryForQuote.customer_name,
-            company: selectedEnquiryForQuote.company_name,
-            phone: selectedEnquiryForQuote.phone,
-            email: selectedEnquiryForQuote.email,
-            customer_type: selectedEnquiryForQuote.customer_type,
-          }}
-          enquiryContext={{
-            enquiry_id: selectedEnquiryForQuote.id,
-            enquiry_number: selectedEnquiryForQuote.enquiry_number,
-            product_category: selectedEnquiryForQuote.product_category,
-            requirement_summary: selectedEnquiryForQuote.requirement_summary,
-            estimated_budget: selectedEnquiryForQuote.estimated_budget,
-            site_visit: selectedEnquiryForQuote.site_visit,
-          }}
-        />
-      )}
 
 
       {/* Phase C.2: AI Sales Brief & Opportunity Intelligence Modal */}

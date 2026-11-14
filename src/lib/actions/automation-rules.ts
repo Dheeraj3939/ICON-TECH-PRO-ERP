@@ -1,6 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { isUuid } from '@/lib/supabase/db-helpers';
+import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { queueOutboxMessage } from '@/lib/actions/communication';
@@ -64,6 +67,20 @@ function getRulesStore(): WorkflowRule[] {
  * Fetch all configured automated workflow rules.
  */
 export async function getWorkflowRules(): Promise<{ success: boolean; data: WorkflowRule[] }> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const { data, error } = await admin
+        .from('workflow_rules')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        return { success: true, data: data as WorkflowRule[] };
+      }
+    } catch {
+      // Fallback
+    }
+  }
   const store = getRulesStore();
   return { success: true, data: store };
 }
@@ -83,6 +100,27 @@ export async function createWorkflowRule(
       ...ruleData,
       created_at: new Date().toISOString(),
     };
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const { data: insertedRule } = await admin
+          .from('workflow_rules')
+          .insert({
+            name: rule.name,
+            trigger_event: rule.trigger_event,
+            conditions: rule.conditions || {},
+            action_type: rule.action_type,
+            action_payload: rule.action_payload || {},
+            is_active: rule.is_active,
+          })
+          .select('id')
+          .single();
+        if (insertedRule?.id) rule.id = insertedRule.id;
+      } catch {
+        // Fallback
+      }
+    }
 
     store.unshift(rule);
 
@@ -108,14 +146,23 @@ export async function toggleWorkflowRule(
 ): Promise<{ success: boolean; data?: WorkflowRule; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM']);
-    const store = getRulesStore();
-    const rule = store.find((r) => r.id === id);
+    const { data: rules } = await getWorkflowRules();
+    const rule = rules.find((r) => r.id === id);
 
     if (!rule) {
       return { success: false, error: 'Workflow rule not found.' };
     }
 
     rule.is_active = isActive;
+
+    if (await isSupabaseAvailable() && isUuid(id)) {
+      try {
+        const admin = createAdminClient();
+        await admin.from('workflow_rules').update({ is_active: isActive }).eq('id', id);
+      } catch {
+        // Fallback
+      }
+    }
 
     await logAuditEvent({
       userName: authUser.name,
@@ -138,8 +185,8 @@ export async function triggerWorkflowEvent(
   payload: Record<string, any>
 ): Promise<{ success: boolean; executedRulesCount: number; error?: string }> {
   try {
-    const store = getRulesStore();
-    const matchingRules = store.filter((r) => r.is_active && r.trigger_event === eventName);
+    const { data: rules } = await getWorkflowRules();
+    const matchingRules = rules.filter((r) => r.is_active && r.trigger_event === eventName);
 
     let executedCount = 0;
 

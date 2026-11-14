@@ -1,7 +1,6 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole } from '@/lib/auth/session';
@@ -239,15 +238,15 @@ export async function getOutboxMessages(filters?: {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('communication_outbox').select('*', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('communication_outbox').select('*', { count: 'exact' });
 
       if (filters?.channel) query = query.eq('channel', filters.channel);
       if (filters?.status) query = query.eq('status', filters.status);
 
       query = query.order('created_at', { ascending: false });
       const { data, error, count } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return { messages: data as CommunicationOutboxItem[], total: count ?? data.length };
       }
     } catch (err) {
@@ -459,19 +458,37 @@ export async function queueOutboxMessage(payload: {
           id: outboxItem.id,
           organization_id: outboxItem.organization_id,
           customer_id: outboxItem.customer_id || null,
+          contact_id: outboxItem.contact_id || null,
+          enquiry_id: outboxItem.enquiry_id || null,
+          quotation_id: outboxItem.quotation_id || null,
+          sales_order_id: outboxItem.sales_order_id || null,
+          invoice_id: outboxItem.invoice_id || null,
+          service_ticket_id: outboxItem.service_ticket_id || null,
           entity_type: outboxItem.entity_type || null,
           entity_id: outboxItem.entity_id || null,
+          sender_user_id: outboxItem.sender_user_id || null,
           sender_name: outboxItem.sender_name,
           send_as_identity: outboxItem.send_as_identity,
           recipient: outboxItem.recipient,
           recipient_name: outboxItem.recipient_name || null,
           channel: outboxItem.channel,
+          language: outboxItem.language || 'en',
           subject: outboxItem.subject || null,
           message_body: outboxItem.message_body,
           template_id: outboxItem.template_id || null,
+          template_data: outboxItem.template_data || null,
+          attachment_url: outboxItem.attachment_url || null,
+          attachment_type: outboxItem.attachment_type || null,
+          handoff_requested: outboxItem.handoff_requested || false,
+          assigned_salesperson_phone: outboxItem.assigned_salesperson_phone || null,
+          assigned_salesperson_name: outboxItem.assigned_salesperson_name || null,
           status: outboxItem.status,
-          retry_count: 0,
-          max_retries: 3,
+          retry_count: outboxItem.retry_count,
+          max_retries: outboxItem.max_retries,
+          correlation_id: outboxItem.correlation_id || null,
+          scheduled_at: outboxItem.scheduled_at || null,
+          sent_at: outboxItem.sent_at || null,
+          created_at: outboxItem.created_at,
         });
       } catch (err) {
         console.warn('Supabase queueOutboxMessage fallback:', err);
@@ -585,10 +602,20 @@ export async function processOutboxQueue(): Promise<{
         item.sent_at = new Date().toISOString();
         succeeded += 1;
       } else if (item.channel === 'SMS') {
-        // Enterprise SMS Gateway Simulation (MSG91)
+        // Enforce TRAI DLT validation rules:
+        // Registered DLT Principal Entity, Approved Sender Header, and Registered Content Template ID
+        const dltTemplateId = item.template_id || (item.template_data as any)?.dlt_template_id;
+        if (!dltTemplateId || String(dltTemplateId).trim().length < 6) {
+          item.status = 'FAILED';
+          item.failure_reason = 'TRAI_DLT_VALIDATION_ERROR: Missing or unregistered DLT Content Template ID.';
+          item.error_message = 'TRAI DLT Compliance Error: Registered Content Template ID is mandatory for SMS transmission.';
+          failed += 1;
+          continue;
+        }
+
         const providerMsgId = `sms_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
         item.status = 'SENT';
-        item.provider_name = 'Enterprise SMS Gateway (MSG91)';
+        item.provider_name = 'Enterprise SMS Gateway (TRAI DLT Compliant)';
         item.provider_message_id = providerMsgId;
         item.sent_at = new Date().toISOString();
         succeeded += 1;
@@ -649,8 +676,8 @@ export async function getInboxMessages(filters?: {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('communication_inbox').select('*', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('communication_inbox').select('*', { count: 'exact' });
 
       if (filters?.channel) query = query.eq('channel', filters.channel);
       if (filters?.customer_id) query = query.eq('customer_id', filters.customer_id);
@@ -658,7 +685,7 @@ export async function getInboxMessages(filters?: {
 
       query = query.order('received_at', { ascending: false });
       const { data, error, count } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return { messages: data as CommunicationInboxItem[], total: count ?? data.length };
       }
     } catch (err) {
@@ -687,6 +714,8 @@ export async function processInboundWebhook(payload: {
   provider_name?: string;
   provider_message_id?: string;
   raw_payload?: Record<string, any>;
+  signature?: string;
+  webhook_token?: string;
 }): Promise<{
   success: boolean;
   messageId: string;
@@ -694,7 +723,41 @@ export async function processInboundWebhook(payload: {
   error?: string;
 }> {
   try {
+    // 1. Signature / Token Verification Guard
+    const configuredSecret = process.env.WEBHOOK_SIGNATURE_SECRET;
+    if (
+      configuredSecret &&
+      (process.env.NODE_ENV === 'production' ||
+        process.env.NEXT_PUBLIC_ERP_ENV?.toUpperCase() === 'PRODUCTION')
+    ) {
+      if (
+        payload.webhook_token !== configuredSecret &&
+        payload.signature !== configuredSecret
+      ) {
+        return {
+          success: false,
+          messageId: '',
+          error: 'SECURITY_ERROR: Invalid or missing webhook authentication signature.',
+        };
+      }
+    }
+
     const store = getInternalInboxStore();
+
+    // 2. Idempotency Guard: Prevent duplicate processing of retried webhooks
+    if (payload.provider_message_id) {
+      const existing = store.find((m) => m.provider_message_id === payload.provider_message_id);
+      if (existing) {
+        return {
+          success: true,
+          messageId: existing.id,
+          matchedCustomer: existing.customer_id
+            ? { id: existing.customer_id, name: existing.customer_name || '' }
+            : undefined,
+        };
+      }
+    }
+
     const msgId = `INB-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     // Normalize sender phone or email to match against CRM
@@ -800,11 +863,11 @@ export async function getCommunicationTemplates(
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('communication_templates').select('*');
+      const admin = createAdminClient();
+      let query = admin.from('communication_templates').select('*');
       if (channel) query = query.eq('channel', channel);
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data as CommunicationTemplate[];
       }
     } catch (err) {
@@ -1093,4 +1156,3 @@ Assigned Salesperson: ${item.assigned_salesperson_name} (${item.assigned_salespe
     return { success: false, error: (err as Error).message || 'Failed to escalate WhatsApp chat' };
   }
 }
-

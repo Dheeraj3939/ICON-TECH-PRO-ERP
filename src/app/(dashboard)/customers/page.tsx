@@ -25,9 +25,13 @@ import { getCustomers, getSalespeopleList } from '@/lib/actions/customers';
 import { CustomerFormModal } from '@/components/customers/customer-form-modal';
 import { CustomerDetailDrawer } from '@/components/customers/customer-detail-drawer';
 import { exportToCSV } from '@/lib/utils/export';
+import { getCurrentSessionUser } from '@/lib/actions/users';
+import { canExportCSV, canImportCSV } from '@/lib/permissions/registry';
 import type { Customer, CustomerType, CustomerStatus } from '@/types/customer';
+import type { AuthenticatedUser } from '@/lib/auth/session';
 
 export default function CustomersPage() {
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [counts, setCounts] = useState({ total: 0, companies: 0, individuals: 0, active: 0 });
   const [loading, setLoading] = useState(true);
@@ -46,8 +50,9 @@ export default function CustomersPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [createdBanner, setCreatedBanner] = useState<string | null>(null);
 
-  // Load Salespeople
+  // Load Session User & Salespeople
   useEffect(() => {
+    getCurrentSessionUser().then(setCurrentUser);
     getSalespeopleList().then(setSalespeople);
   }, []);
 
@@ -94,23 +99,28 @@ export default function CustomersPage() {
   }
 
   function handleExportCSV() {
-    exportToCSV('ICON_Customer_Master', customers, [
-      { key: 'customer_code', label: 'Customer Code' },
-      { key: 'customer_name', label: 'Customer Name' },
-      { key: 'company_name', label: 'Company Name' },
-      { key: 'customer_type', label: 'Type' },
-      { key: 'phone', label: 'Phone' },
-      { key: 'email', label: 'Email' },
-      { key: 'city', label: 'City' },
-      { key: 'state', label: 'State' },
-      { key: 'gstin', label: 'GSTIN' },
-      { key: 'status', label: 'Status' },
-      {
-        key: 'created_at',
-        label: 'Registration Date',
-        format: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : ''),
-      },
-    ]);
+    exportToCSV(
+      'ICON_Customer_Master',
+      customers,
+      [
+        { key: 'customer_code', label: 'Customer Code' },
+        { key: 'customer_name', label: 'Customer Name' },
+        { key: 'company_name', label: 'Company Name' },
+        { key: 'customer_type', label: 'Type' },
+        { key: 'phone', label: 'Phone' },
+        { key: 'email', label: 'Email' },
+        { key: 'city', label: 'City' },
+        { key: 'state', label: 'State' },
+        { key: 'gstin', label: 'GSTIN' },
+        { key: 'status', label: 'Status' },
+        {
+          key: 'created_at',
+          label: 'Registration Date',
+          format: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : ''),
+        },
+      ],
+      currentUser?.role
+    );
   }
 
   return (
@@ -144,21 +154,25 @@ export default function CustomersPage() {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <Link
-            href="/dashboard/import"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-semibold shadow-xs transition duration-150"
-          >
-            <UploadCloud className="w-4 h-4 text-brand-600" />
-            <span>Import CSV</span>
-          </Link>
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-semibold shadow-xs transition duration-150"
-          >
-            <Download className="w-4 h-4 text-slate-500" />
-            <span>Export CSV</span>
-          </button>
+          {canImportCSV(currentUser?.role) && (
+            <Link
+              href="/dashboard/import"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-semibold shadow-xs transition duration-150"
+            >
+              <UploadCloud className="w-4 h-4 text-brand-600" />
+              <span>Import CSV</span>
+            </Link>
+          )}
+          {canExportCSV(currentUser?.role) && (
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-semibold shadow-xs transition duration-150"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={handleOpenCreate}

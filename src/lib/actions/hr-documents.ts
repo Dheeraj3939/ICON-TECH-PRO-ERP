@@ -1,6 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { findByIdOrCode, isUuid, sanitizeUuid } from '@/lib/supabase/db-helpers';
+import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { getAuthenticatedUser, requireRole } from '@/lib/auth/session';
 import { logHRAudit } from '@/lib/actions/employees';
 import {
@@ -54,9 +57,39 @@ export async function getEmployeeDocuments(
 
   const role = authUser.role;
   const store = getDocumentsStore();
-
   let docs = store;
-  if (employeeId) {
+
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin
+        .from('employee_documents')
+        .select('*, employees(full_name)')
+        .order('uploaded_at', { ascending: false });
+      if (employeeId && isUuid(employeeId)) {
+        query = query.eq('employee_id', employeeId);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        docs = data.map((d: any) => ({
+          id: d.id,
+          employee_id: d.employee_id,
+          employee_name: d.employees?.full_name,
+          document_type: d.document_type,
+          document_name: d.document_name,
+          file_url: d.file_url,
+          sensitivity: d.sensitivity,
+          uploaded_by: d.uploaded_by,
+          notes: d.notes,
+          uploaded_at: d.uploaded_at,
+        })) as EmployeeDocument[];
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  if (employeeId && !isUuid(employeeId)) {
     docs = docs.filter((d) => d.employee_id === employeeId);
   }
 
@@ -120,6 +153,35 @@ export async function uploadEmployeeDocument(data: {
 
   const store = getDocumentsStore();
   store.unshift(newDoc);
+
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let resolvedEmpId = sanitizeUuid(data.employee_id);
+      if (!resolvedEmpId) {
+        const empRow = await findByIdOrCode<{ id: string }>(admin, 'employees', data.employee_id, 'employee_id', 'id');
+        resolvedEmpId = empRow?.id || null;
+      }
+      if (resolvedEmpId) {
+        const { data: insertedDoc } = await admin
+          .from('employee_documents')
+          .insert({
+            employee_id: resolvedEmpId,
+            document_type: newDoc.document_type,
+            document_name: newDoc.document_name,
+            file_url: newDoc.file_url,
+            sensitivity: newDoc.sensitivity,
+            uploaded_by: newDoc.uploaded_by,
+            notes: newDoc.notes || null,
+          })
+          .select('id')
+          .single();
+        if (insertedDoc?.id) newDoc.id = insertedDoc.id;
+      }
+    } catch {
+      // Non-fatal fallback
+    }
+  }
 
   await logHRAudit({
     performed_by: authUser.name,

@@ -24,6 +24,7 @@ import {
   PauseCircle,
   UserX,
   UserCheck,
+  Send,
 } from 'lucide-react';
 import { SettingsNav } from '@/components/layout/SettingsNav';
 import {
@@ -36,6 +37,7 @@ import {
   suspendUser,
   deactivateUser,
   reactivateUser,
+  resendUserInvitation,
 } from '@/lib/actions/users';
 import { getRoles } from '@/lib/actions/permissions';
 import { AddEmployeeModal } from '@/components/admin/AddEmployeeModal';
@@ -154,6 +156,19 @@ export default function UsersManagementPage() {
       loadData();
     } else {
       showMessage('error', res.error || 'Failed to reactivate user');
+    }
+  }
+
+  async function handleResendInvitation(user: ManagedUser) {
+    const res = await resendUserInvitation(user.id);
+    if (res.success) {
+      showMessage(
+        'success',
+        `Account setup invitation dispatched to ${user.email}. Expiring single-use token generated.`
+      );
+      loadData();
+    } else {
+      showMessage('error', res.error || 'Failed to send invitation');
     }
   }
 
@@ -436,6 +451,16 @@ export default function UsersManagementPage() {
                           <ExternalLink className="w-3.5 h-3.5" />
                         </Link>
 
+                        {/* Send / Resend Invitation */}
+                        <button
+                          type="button"
+                          onClick={() => handleResendInvitation(user)}
+                          title="Dispatch Account Activation / Password Setup Link"
+                          className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 border border-emerald-200 transition"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                        </button>
+
                         {/* Lifecycle Buttons */}
                         {isAct && (
                           <>
@@ -589,6 +614,14 @@ export default function UsersManagementPage() {
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleResendInvitation(user)}
+                    className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 border border-emerald-200"
+                    title="Dispatch Invitation"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
                 </div>
 
                 <div className="flex items-center gap-1.5">

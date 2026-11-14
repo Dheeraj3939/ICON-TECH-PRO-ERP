@@ -6,8 +6,9 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { INITIAL_CUSTOMERS, STAFF_MEMBERS } from '@/lib/constants/erp-data';
 import { getNextCustomerCode } from '@/lib/utils/sequence';
-import { requireRole } from '@/lib/auth/session';
+import { requireRole, requireAuth } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
+import { findByIdOrCode, sanitizeSearchTerm } from '@/lib/supabase/db-helpers';
 import { customerSchema, type CustomerFormValues } from '@/lib/validations/customer';
 import type { Customer, CustomerFilters, CustomerFormData } from '@/types/customer';
 
@@ -42,13 +43,14 @@ export async function getCustomers(filters?: CustomerFilters): Promise<{
     active: number;
   };
 }> {
+  await requireAuth();
   const store = getCustomersStore();
 
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase
+      const admin = createAdminClient();
+      let query = admin
         .from('customers')
         .select('*, salesperson:user_profiles!customers_salesperson_id_fkey(*, role:roles(*))', { count: 'exact' });
 
@@ -62,12 +64,20 @@ export async function getCustomers(filters?: CustomerFilters): Promise<{
         query = query.eq('salesperson_id', filters.salesperson_id);
       }
       if (filters?.search) {
-        const s = filters.search.trim();
-        query = query.or(
-          `customer_code.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%`
-        );
+        const s = sanitizeSearchTerm(filters.search);
+        if (s) {
+          query = query.or(
+            `customer_code.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,gstin.ilike.%${s}%,email.ilike.%${s}%`
+          );
+        }
       }
       query = query.order('created_at', { ascending: false });
+
+      if (filters?.search) {
+        query = query.limit(50);
+      } else {
+        query = query.limit(100);
+      }
 
       const { data, error, count } = await query;
 
@@ -130,20 +140,22 @@ export async function getCustomers(filters?: CustomerFilters): Promise<{
  * Retrieve a single customer record by UUID or Customer Code.
  */
 export async function getCustomerById(id: string): Promise<Customer | null> {
+  await requireAuth();
   const store = getCustomersStore();
 
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      const { data, error } = await supabase
-        .from('customers')
-        .select('*, salesperson:user_profiles!customers_salesperson_id_fkey(*, role:roles(*))')
-        .or(`id.eq.${id},customer_code.eq.${id}`)
-        .single();
-
-      if (!error && data) {
-        return data as Customer;
+      const admin = createAdminClient();
+      const foundDb = await findByIdOrCode<Customer>(
+        admin,
+        'customers',
+        id,
+        'customer_code',
+        '*, salesperson:user_profiles!customers_salesperson_id_fkey(*, role:roles(*))'
+      );
+      if (foundDb) {
+        return foundDb;
       }
     } catch (err) {
       console.warn('Supabase getCustomerById failed, checking resilient store:', err);
@@ -211,9 +223,12 @@ export async function createCustomer(values: CustomerFormValues): Promise<{
       pan: parsed.pan || null,
       credit_limit: parsed.credit_limit || 0,
       enquiry_source: parsed.enquiry_source,
-      salesperson_id: parsed.salesperson_id || null,
+      salesperson_id: authUser.role === 'Sales Executive' ? authUser.id : (parsed.salesperson_id || authUser.id),
       status: parsed.status,
       notes: parsed.notes || null,
+      contacts: (parsed as any).contacts || [],
+      shipping_addresses: (parsed as any).shipping_addresses || [],
+      internal_notes: (parsed as any).internal_notes || (parsed.notes ? { general_notes: parsed.notes } : {}),
       created_by: authUser.id,
       updated_by: null,
       created_at: new Date().toISOString(),
@@ -318,59 +333,70 @@ export async function updateCustomer(
     ]);
 
     const store = getCustomersStore();
-    const existingIndex = store.findIndex((c) => c.id === id || c.customer_code === id);
+    const isOnline = await isSupabaseAvailable();
+    let existingRecord: Customer | undefined = store.find((c) => c.id === id || c.customer_code === id);
 
-    if (existingIndex === -1) {
+    if (isOnline && !existingRecord) {
+      const admin = createAdminClient();
+      const dbFound = await findByIdOrCode<Customer>(admin, 'customers', id, 'customer_code');
+      if (dbFound) {
+        existingRecord = dbFound;
+      }
+    }
+
+    if (!existingRecord) {
       return { success: false, error: 'Customer record not found' };
     }
 
-    const currentType = values.customer_type !== undefined ? values.customer_type : store[existingIndex].customer_type;
+    const existingIndex = store.findIndex((c) => c.id === existingRecord!.id || c.customer_code === existingRecord!.customer_code);
+    const currentType = values.customer_type !== undefined ? values.customer_type : existingRecord.customer_type;
     const isCompany = currentType === 'COMPANY';
     const isGovt = currentType === 'GOVERNMENT';
 
     const updatedCustomer: Customer = {
-      ...store[existingIndex],
+      ...existingRecord,
       customer_type: currentType,
-      company_name: (isCompany || isGovt) ? (values.company_name ?? store[existingIndex].company_name) : null,
+      company_name: (isCompany || isGovt) ? (values.company_name ?? existingRecord.company_name) : null,
       customer_name: (isCompany || isGovt)
-        ? (values.company_name ?? values.customer_name ?? store[existingIndex].customer_name)
-        : (values.customer_name ?? store[existingIndex].customer_name),
-      department_name: isGovt ? (values.department_name ?? store[existingIndex].department_name) : null,
-      tender_reference: isGovt ? (values.tender_reference ?? store[existingIndex].tender_reference) : null,
-      gem_order_number: isGovt ? (values.gem_order_number ?? store[existingIndex].gem_order_number) : null,
-      gem_seller_id: isGovt ? (values.gem_seller_id ?? store[existingIndex].gem_seller_id) : null,
-      emd_amount: isGovt ? (values.emd_amount ?? store[existingIndex].emd_amount) : 0,
-      nodal_officer: isGovt ? (values.nodal_officer ?? store[existingIndex].nodal_officer) : null,
-      payment_terms_days: values.payment_terms_days ?? store[existingIndex].payment_terms_days,
-      contact_person: (isCompany || isGovt) ? (values.contact_person ?? store[existingIndex].contact_person) : null,
-      designation: (isCompany || isGovt) ? (values.designation ?? store[existingIndex].designation) : null,
-      phone: values.phone ?? store[existingIndex].phone,
-      alternate_phone: values.alternate_phone !== undefined ? values.alternate_phone : store[existingIndex].alternate_phone,
-      email: values.email !== undefined ? values.email : store[existingIndex].email,
-      billing_address: values.billing_address !== undefined ? values.billing_address : store[existingIndex].billing_address,
-      shipping_address: values.shipping_address !== undefined ? values.shipping_address : store[existingIndex].shipping_address,
-      city: values.city ?? store[existingIndex].city,
-      state: values.state ?? store[existingIndex].state,
-      state_code: values.state_code ?? store[existingIndex].state_code,
-      pincode: values.pincode !== undefined ? values.pincode : store[existingIndex].pincode,
-      gstin: values.gstin !== undefined ? values.gstin : store[existingIndex].gstin,
-      pan: values.pan !== undefined ? values.pan : store[existingIndex].pan,
-      credit_limit: values.credit_limit ?? store[existingIndex].credit_limit,
-      enquiry_source: values.enquiry_source ?? store[existingIndex].enquiry_source,
-      salesperson_id: values.salesperson_id !== undefined ? values.salesperson_id : store[existingIndex].salesperson_id,
-      status: values.status ?? store[existingIndex].status,
-      notes: values.notes !== undefined ? values.notes : store[existingIndex].notes,
+        ? (values.company_name ?? values.customer_name ?? existingRecord.customer_name)
+        : (values.customer_name ?? existingRecord.customer_name),
+      department_name: isGovt ? (values.department_name ?? existingRecord.department_name) : null,
+      tender_reference: isGovt ? (values.tender_reference ?? existingRecord.tender_reference) : null,
+      gem_order_number: isGovt ? (values.gem_order_number ?? existingRecord.gem_order_number) : null,
+      gem_seller_id: isGovt ? (values.gem_seller_id ?? existingRecord.gem_seller_id) : null,
+      emd_amount: isGovt ? (values.emd_amount ?? existingRecord.emd_amount) : 0,
+      nodal_officer: isGovt ? (values.nodal_officer ?? existingRecord.nodal_officer) : null,
+      payment_terms_days: values.payment_terms_days ?? existingRecord.payment_terms_days,
+      contact_person: (isCompany || isGovt) ? (values.contact_person ?? existingRecord.contact_person) : null,
+      designation: (isCompany || isGovt) ? (values.designation ?? existingRecord.designation) : null,
+      phone: values.phone ?? existingRecord.phone,
+      alternate_phone: values.alternate_phone !== undefined ? values.alternate_phone : existingRecord.alternate_phone,
+      email: values.email !== undefined ? values.email : existingRecord.email,
+      billing_address: values.billing_address !== undefined ? values.billing_address : existingRecord.billing_address,
+      shipping_address: values.shipping_address !== undefined ? values.shipping_address : existingRecord.shipping_address,
+      city: values.city ?? existingRecord.city,
+      state: values.state ?? existingRecord.state,
+      state_code: values.state_code ?? existingRecord.state_code,
+      pincode: values.pincode !== undefined ? values.pincode : existingRecord.pincode,
+      gstin: values.gstin !== undefined ? values.gstin : existingRecord.gstin,
+      pan: values.pan !== undefined ? values.pan : existingRecord.pan,
+      credit_limit: values.credit_limit ?? existingRecord.credit_limit,
+      enquiry_source: values.enquiry_source ?? existingRecord.enquiry_source,
+      salesperson_id: values.salesperson_id !== undefined ? values.salesperson_id : existingRecord.salesperson_id,
+      status: values.status ?? existingRecord.status,
+      notes: values.notes !== undefined ? values.notes : existingRecord.notes,
       updated_by: authUser.id,
       updated_at: new Date().toISOString(),
     };
 
-    store[existingIndex] = updatedCustomer;
+    if (existingIndex !== -1) {
+      store[existingIndex] = updatedCustomer;
+    }
 
-    const isOnline = await isSupabaseAvailable();
     if (isOnline) {
       try {
         const admin = createAdminClient();
-        await admin
+        const { error: updErr } = await admin
           .from('customers')
           .update({
             customer_type: updatedCustomer.customer_type,
@@ -397,7 +423,11 @@ export async function updateCustomer(
             updated_by: isUUID(authUser.id) ? authUser.id : null,
             updated_at: updatedCustomer.updated_at,
           })
-          .or(`id.eq.${id},customer_code.eq.${id}`);
+          .eq('id', existingRecord.id);
+
+        if (updErr) {
+          return { success: false, error: `Failed to update customer: ${updErr.message}` };
+        }
       } catch (err) {
         console.warn('Supabase customer update failed:', err);
       }
@@ -435,22 +465,34 @@ export async function deleteCustomer(id: string): Promise<{ success: boolean; er
     const authUser = await requireRole(['Managing Director', 'Admin / BDM']);
 
     const store = getCustomersStore();
-    const idx = store.findIndex((c) => c.id === id || c.customer_code === id);
-    if (idx === -1) {
+    const isOnline = await isSupabaseAvailable();
+    let targetCustomer: Customer | undefined = store.find((c) => c.id === id || c.customer_code === id);
+
+    if (isOnline && !targetCustomer) {
+      const admin = createAdminClient();
+      const dbFound = await findByIdOrCode<Customer>(admin, 'customers', id, 'customer_code');
+      if (dbFound) targetCustomer = dbFound;
+    }
+
+    if (!targetCustomer) {
       return { success: false, error: 'Customer not found' };
     }
 
-    const removed = store.splice(idx, 1)[0];
-
-    const isOnline = await isSupabaseAvailable();
     if (isOnline) {
       try {
         const admin = createAdminClient();
-        await admin.from('customers').delete().or(`id.eq.${id},customer_code.eq.${id}`);
-      } catch (err) {
-        console.warn('Supabase customer delete failed:', err);
+        const { error: delErr } = await admin.from('customers').delete().eq('id', targetCustomer.id);
+        if (delErr) {
+          return { success: false, error: `Failed to delete customer: ${delErr.message}` };
+        }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to delete customer' };
       }
     }
+
+    const idx = store.findIndex((c) => c.id === targetCustomer!.id || c.customer_code === targetCustomer!.customer_code);
+    if (idx !== -1) store.splice(idx, 1);
+    const removed = targetCustomer;
 
     await logAuditEvent({
       userName: authUser.name,
@@ -476,15 +518,15 @@ export async function getSalespeopleList(): Promise<Array<{ id: string; name: st
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
+      const admin = createAdminClient();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error }: { data: any; error: any } = await supabase
+      const { data, error }: { data: any; error: any } = await admin
         .from('user_profiles')
         .select('id, full_name, roles(role_name)')
         .eq('is_active', true)
         .order('full_name');
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return data.map((d: any) => ({
           id: d.id,
@@ -518,12 +560,24 @@ export async function checkCustomerDuplicate(query: {
   matchedBy?: 'phone' | 'email' | 'gstin';
   existingCustomer?: Customer;
 }> {
-  const store = getCustomersStore();
   const cleanPhone = (query.phone || '').replace(/\D/g, '').slice(-10);
   const cleanEmail = (query.email || '').trim().toLowerCase();
   const cleanGstin = (query.gstin || '').trim().toUpperCase();
 
-  for (const c of store) {
+  let list: Customer[] = [];
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const { data, error } = await admin.from('customers').select('*').limit(1000);
+      if (!error && data) {
+        list = data as Customer[];
+      }
+    } catch {}
+  } else {
+    list = getCustomersStore();
+  }
+
+  for (const c of list) {
     if (query.excludeId && (c.id === query.excludeId || c.customer_code === query.excludeId)) {
       continue;
     }

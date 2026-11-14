@@ -8,8 +8,17 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { encryptToken, generateOAuthState } from '@/lib/integrations/zoho-crypto';
 import { getZohoOAuthCredentials } from '@/lib/integrations/zoho-env';
 import { getStoredZohoCredentials } from '@/lib/integrations/zoho/token-manager';
+import { getResolvedSiteUrl } from '@/lib/utils/site-url';
 import { getZohoCrmClient } from '@/lib/integrations/zoho/client';
 import { executeZohoSync, getRecentZohoSyncLogs } from '@/lib/integrations/zoho/sync';
+import {
+  getZohoOrganizationRecord,
+  getEmployeeMailboxMappings,
+  syncZohoOrganizationAndMailboxes,
+  confirmOrUpdateMailboxMapping,
+  getZohoIntegrationHealth,
+} from '@/lib/integrations/zoho/employee-mapping';
+import { runZohoReconciliation } from '@/lib/integrations/zoho/sync-scheduler';
 import type {
   ZohoConnectionInfo,
   StoredZohoCredentials,
@@ -17,6 +26,10 @@ import type {
   ZohoSyncOptions,
   ZohoSyncResult,
   ZohoSyncHistoryItem,
+  ZohoOrganization,
+  EmployeeZohoMailboxMapping,
+  ZohoOrganizationConnectionInfo,
+  ZohoMailSyncResult,
 } from '@/types/zoho';
 
 declare global {
@@ -25,7 +38,16 @@ declare global {
 }
 
 const ZOHO_INTEGRATION_ID = 'zoho_crm_icontechpro';
-const ZOHO_STAGE1_SCOPES = ['ZohoCRM.users.READ', 'ZohoCRM.org.READ'];
+const ZOHO_STAGE1_SCOPES = [
+  'ZohoCRM.users.READ',
+  'ZohoCRM.org.READ',
+  'ZohoMail.organization.READ',
+  'ZohoMail.organization.accounts.READ',
+  'ZohoMail.accounts.READ',
+  'ZohoMail.messages.READ',
+  'ZohoMail.messages.CREATE',
+  'ZohoMail.messages.UPDATE',
+];
 const ZOHO_FULL_MODULE_SCOPES = [
   'ZohoCRM.users.READ',
   'ZohoCRM.org.READ',
@@ -33,6 +55,12 @@ const ZOHO_FULL_MODULE_SCOPES = [
   'ZohoCRM.modules.contacts.READ',
   'ZohoCRM.modules.accounts.READ',
   'ZohoCRM.modules.deals.READ',
+  'ZohoMail.organization.READ',
+  'ZohoMail.organization.accounts.READ',
+  'ZohoMail.accounts.READ',
+  'ZohoMail.messages.READ',
+  'ZohoMail.messages.CREATE',
+  'ZohoMail.messages.UPDATE',
 ];
 
 function getZohoMemoryStore(): StoredZohoCredentials | null {
@@ -105,6 +133,8 @@ export async function getZohoConnectionStatus(): Promise<ZohoConnectionInfo> {
   const creds = await getStoredZohoCredentials();
 
   const isConnected = Boolean(creds && creds.status === 'ACTIVE' && creds.encrypted_refresh_token);
+  const resolvedOrigin = await getResolvedSiteUrl();
+  const effectiveRedirectUri = `${resolvedOrigin}/api/integrations/zoho/callback`;
 
   return {
     configured: envInfo.hasClientId && envInfo.hasClientSecret && !envInfo.isPlaceholder,
@@ -131,7 +161,7 @@ export async function getZohoConnectionStatus(): Promise<ZohoConnectionInfo> {
     configured_env: {
       has_client_id: envInfo.hasClientId,
       has_client_secret: envInfo.hasClientSecret,
-      redirect_uri: envInfo.redirectUri,
+      redirect_uri: effectiveRedirectUri,
       accounts_url: envInfo.accountsUrl,
       api_url: envInfo.apiUrl,
       is_placeholder: envInfo.isPlaceholder,
@@ -181,9 +211,12 @@ export async function initiateZohoAuthorization(options?: {
     const state = generateOAuthState(actor.id);
     const scopesToRequest = options?.includeModuleScopes ? ZOHO_FULL_MODULE_SCOPES : ZOHO_STAGE1_SCOPES;
 
+    const resolvedOrigin = await getResolvedSiteUrl();
+    const effectiveRedirectUri = `${resolvedOrigin}/api/integrations/zoho/callback`;
+
     const params = new URLSearchParams({
       client_id: clientId.trim(),
-      redirect_uri: redirectUri.trim(),
+      redirect_uri: effectiveRedirectUri,
       response_type: 'code',
       access_type: 'offline',
       scope: scopesToRequest.join(','),
@@ -473,3 +506,116 @@ export async function getZohoSyncHistoryAction(limit = 10): Promise<ZohoSyncHist
   await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
   return getRecentZohoSyncLogs(limit);
 }
+
+// ----------------------------------------------------------------------------
+// Zoho Organization & Mail Organization Server Actions
+// ----------------------------------------------------------------------------
+
+/**
+ * Retrieve comprehensive status across Zoho Organization, Zoho Mail, and Zoho CRM.
+ * Accessible to authorized staff (safe public metadata, zero tokens or secrets).
+ */
+export async function getZohoOrganizationStatus(): Promise<ZohoOrganizationConnectionInfo> {
+  const org = await getZohoOrganizationRecord();
+  const crmInfo = await getZohoConnectionStatus();
+  const mappings = await getEmployeeMailboxMappings();
+  const health = await getZohoIntegrationHealth();
+
+  const activeMailboxes = mappings.filter((m) => m.mailbox_status === 'ACTIVE').length;
+  const mappedEmployees = mappings.filter((m) => m.mapping_status === 'CONFIRMED').length;
+  const unmappedCount = mappings.filter((m) => m.mapping_status === 'PROPOSED' || m.mapping_status === 'HUMAN_REVIEW_REQUIRED').length;
+  const disabledCount = mappings.filter((m) => m.mapping_status === 'DEACTIVATED' || m.mailbox_status === 'DISABLED' || m.mailbox_status === 'SUSPENDED').length;
+
+  return {
+    organization: org,
+    mail: {
+      active_mailboxes_count: activeMailboxes,
+      mapped_employees_count: mappedEmployees,
+      unmapped_users_count: unmappedCount,
+      disabled_users_count: disabledCount,
+      last_sync_at: org.last_sync_at,
+    },
+    crm: {
+      connected: crmInfo.connected,
+      status: crmInfo.status,
+      last_sync_at: crmInfo.sync_summary?.last_sync_at,
+      records_synced_total: crmInfo.sync_summary?.records_synced_total,
+    },
+    token: {
+      expires_at: crmInfo.expires_at,
+      is_valid: crmInfo.connected,
+      granted_scopes: crmInfo.scopes || [],
+      authorized_by: crmInfo.connected_by,
+    },
+    health,
+  };
+}
+
+/**
+ * Retrieve dynamic employee-to-Zoho mailbox mappings.
+ * Restricted to Managing Director and Admin / BDM.
+ */
+export async function getZohoMailboxMappingsAction(): Promise<EmployeeZohoMailboxMapping[]> {
+  await requireRole(['Managing Director', 'Admin / BDM']);
+  return getEmployeeMailboxMappings();
+}
+
+/**
+ * Synchronize Zoho Mail Organization directory users and run dynamic employee mapping.
+ * Restricted to Managing Director and Admin / BDM.
+ */
+export async function syncZohoOrganizationAndMailAction(): Promise<ZohoMailSyncResult> {
+  const actor = await requireRole(['Managing Director', 'Admin / BDM']);
+  const result = await syncZohoOrganizationAndMailboxes({ id: actor.id, name: actor.name });
+  revalidatePath('/dashboard/settings/integrations');
+  return result;
+}
+
+/**
+ * Confirm or update an employee-to-mailbox mapping.
+ * Restricted to Managing Director and Admin / BDM.
+ */
+export async function confirmZohoMailboxMappingAction(
+  mappingId: string,
+  updates: {
+    employee_id?: string;
+    mapping_status?: 'CONFIRMED' | 'DEACTIVATED';
+    notes?: string;
+  }
+): Promise<{ success: boolean; data?: EmployeeZohoMailboxMapping; error?: string }> {
+  try {
+    const actor = await requireRole(['Managing Director', 'Admin / BDM']);
+    const updated = await confirmOrUpdateMailboxMapping(mappingId, updates, { id: actor.id, name: actor.name });
+    if (!updated) {
+      return { success: false, error: 'Mapping record not found' };
+    }
+    revalidatePath('/dashboard/settings/integrations');
+    return { success: true, data: updated };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to update mailbox mapping' };
+  }
+}
+
+/**
+ * Trigger background reconciliation across Zoho Mail and Zoho CRM.
+ * Restricted to Managing Director and Admin / BDM.
+ */
+export async function triggerZohoReconciliationAction(): Promise<{ success: boolean; result?: any; error?: string }> {
+  try {
+    const actor = await requireRole(['Managing Director', 'Admin / BDM']);
+    const result = await runZohoReconciliation({ id: actor.id, name: actor.name });
+    revalidatePath('/dashboard/settings/integrations');
+    return { success: true, result };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Reconciliation failed' };
+  }
+}
+
+/**
+ * Retrieve live integration health across Organization, Mail, and CRM.
+ */
+export async function getZohoHealthStatusAction() {
+  await requireRole(['Managing Director', 'Admin / BDM', 'BDM']);
+  return getZohoIntegrationHealth();
+}
+

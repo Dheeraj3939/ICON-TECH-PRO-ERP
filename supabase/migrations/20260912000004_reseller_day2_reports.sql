@@ -38,27 +38,46 @@ CREATE INDEX IF NOT EXISTS idx_rpt_def_source ON public.report_definitions(data_
 
 ALTER TABLE public.report_definitions ENABLE ROW LEVEL SECURITY;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies WHERE tablename = 'report_definitions' AND policyname = 'Authenticated users can view reports'
-  ) THEN
-    CREATE POLICY "Authenticated users can view reports"
-      ON public.report_definitions FOR SELECT
-      TO authenticated
-      USING (TRUE);
-  END IF;
+DROP POLICY IF EXISTS "Authenticated users can view reports" ON public.report_definitions;
+DROP POLICY IF EXISTS "Authenticated users can create custom reports" ON public.report_definitions;
+DROP POLICY IF EXISTS "Authorized managers can create company reports" ON public.report_definitions;
+DROP POLICY IF EXISTS "Report owners and managers can update reports" ON public.report_definitions;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies WHERE tablename = 'report_definitions' AND policyname = 'Authenticated users can create custom reports'
-  ) THEN
-    CREATE POLICY "Authenticated users can create custom reports"
-      ON public.report_definitions FOR INSERT
-      TO authenticated
-      WITH CHECK (TRUE);
-  END IF;
-END $$;
+CREATE POLICY "Authenticated users can view reports"
+  ON public.report_definitions FOR SELECT TO authenticated
+  USING (
+    public.current_erp_role() IN ('Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant')
+    AND (is_company_report OR created_by_id = auth.uid())
+  );
 
+CREATE POLICY "Authenticated users can create custom reports"
+  ON public.report_definitions FOR INSERT TO authenticated
+  WITH CHECK (
+    public.current_erp_role() IN ('Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts')
+    AND created_by_id = auth.uid()
+    AND is_company_report = FALSE
+  );
+
+CREATE POLICY "Authorized managers can create company reports"
+  ON public.report_definitions FOR INSERT TO authenticated
+  WITH CHECK (
+    public.current_erp_role() IN ('Managing Director', 'Admin / BDM', 'BDM')
+    AND created_by_id = auth.uid()
+    AND is_company_report = TRUE
+  );
+
+CREATE POLICY "Report owners and managers can update reports"
+  ON public.report_definitions FOR UPDATE TO authenticated
+  USING (
+    created_by_id = auth.uid()
+    OR public.current_erp_role() IN ('Managing Director', 'Admin / BDM', 'BDM')
+  )
+  WITH CHECK (
+    created_by_id = auth.uid()
+    OR public.current_erp_role() IN ('Managing Director', 'Admin / BDM', 'BDM')
+  );
+
+REVOKE ALL ON public.report_definitions FROM PUBLIC, anon;
 GRANT SELECT, INSERT, UPDATE ON public.report_definitions TO authenticated;
 
 -- ------------------------------------------------------------------------------
@@ -85,34 +104,32 @@ CREATE INDEX IF NOT EXISTS idx_rpt_sub_next_run ON public.report_subscriptions(n
 
 ALTER TABLE public.report_subscriptions ENABLE ROW LEVEL SECURITY;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies WHERE tablename = 'report_subscriptions' AND policyname = 'Users can manage own subscriptions'
-  ) THEN
-    CREATE POLICY "Users can manage own subscriptions"
-      ON public.report_subscriptions FOR ALL
-      TO authenticated
-      USING (user_id = auth.uid());
-  END IF;
+DROP POLICY IF EXISTS "Users can manage own subscriptions" ON public.report_subscriptions;
+DROP POLICY IF EXISTS "Admins can view all subscriptions" ON public.report_subscriptions;
+CREATE POLICY "Users can view own subscriptions"
+  ON public.report_subscriptions FOR SELECT TO authenticated
+  USING (user_id = auth.uid());
+CREATE POLICY "Administrators can view all subscriptions"
+  ON public.report_subscriptions FOR SELECT TO authenticated
+  USING (public.current_erp_role() IN ('Managing Director', 'Admin / BDM'));
+CREATE POLICY "Users can create own subscriptions"
+  ON public.report_subscriptions FOR INSERT TO authenticated
+  WITH CHECK (
+    user_id = auth.uid()
+    AND public.current_erp_role() IN ('Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant')
+  );
+CREATE POLICY "Users can update own subscriptions"
+  ON public.report_subscriptions FOR UPDATE TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY "Users can delete own subscriptions"
+  ON public.report_subscriptions FOR DELETE TO authenticated
+  USING (
+    user_id = auth.uid()
+    AND public.current_erp_role() IN ('Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant')
+  );
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies WHERE tablename = 'report_subscriptions' AND policyname = 'Admins can view all subscriptions'
-  ) THEN
-    CREATE POLICY "Admins can view all subscriptions"
-      ON public.report_subscriptions FOR SELECT
-      TO authenticated
-      USING (
-        EXISTS (
-          SELECT 1 FROM public.user_profiles up
-          JOIN public.roles r ON up.role_id = r.id
-          WHERE up.id = auth.uid()
-            AND r.name IN ('Managing Director', 'Admin / BDM')
-        )
-      );
-  END IF;
-END $$;
-
+REVOKE ALL ON public.report_subscriptions FROM PUBLIC, anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.report_subscriptions TO authenticated;
 
 -- ------------------------------------------------------------------------------
@@ -133,18 +150,12 @@ CREATE TABLE IF NOT EXISTS public.report_delivery_logs (
 
 ALTER TABLE public.report_delivery_logs ENABLE ROW LEVEL SECURITY;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies WHERE tablename = 'report_delivery_logs' AND policyname = 'Authenticated users can view delivery logs'
-  ) THEN
-    CREATE POLICY "Authenticated users can view delivery logs"
-      ON public.report_delivery_logs FOR SELECT
-      TO authenticated
-      USING (TRUE);
-  END IF;
-END $$;
+DROP POLICY IF EXISTS "Authenticated users can view delivery logs" ON public.report_delivery_logs;
+CREATE POLICY "Finance and administrators can view delivery logs"
+  ON public.report_delivery_logs FOR SELECT TO authenticated
+  USING (public.current_erp_role() IN ('Managing Director', 'Admin / BDM', 'Accounts'));
 
-GRANT SELECT, INSERT ON public.report_delivery_logs TO authenticated;
+REVOKE ALL ON public.report_delivery_logs FROM PUBLIC, anon;
+GRANT SELECT ON public.report_delivery_logs TO authenticated;
 
 COMMIT;

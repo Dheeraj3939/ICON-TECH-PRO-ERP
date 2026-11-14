@@ -8,6 +8,7 @@ import { INITIAL_PRODUCTS, PRODUCT_CATEGORIES } from '@/lib/constants/erp-data';
 import { getNextInventoryTxId } from '@/lib/utils/sequence';
 import { requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
+import { findByIdOrCode, sanitizeUuid, sanitizeSearchTerm } from '@/lib/supabase/db-helpers';
 import type { Product } from '@/types/erp';
 import type { ProductFormValues } from '@/lib/validations/erp';
 
@@ -85,15 +86,18 @@ export async function getProducts(filters?: {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('products').select('*', { count: 'exact' });
+      const admin = createAdminClient();
+      const targetTable = canSeePurchaseCost ? 'products' : 'products_catalog';
+      let query = admin.from(targetTable).select('*', { count: 'exact' });
 
       if (filters?.category && filters.category !== 'ALL') {
         query = query.eq('category_name', filters.category);
       }
       if (filters?.search) {
-        const s = filters.search.trim();
-        query = query.or(`sku.ilike.%${s}%,name.ilike.%${s}%,brand_name.ilike.%${s}%,model_name.ilike.%${s}%`);
+        const s = sanitizeSearchTerm(filters.search);
+        if (s) {
+          query = query.or(`sku.ilike.%${s}%,name.ilike.%${s}%,brand_name.ilike.%${s}%,model_name.ilike.%${s}%`);
+        }
       }
 
       query = query.order('name', { ascending: true });
@@ -103,6 +107,7 @@ export async function getProducts(filters?: {
         let list = (data as Product[]).map(sanitizeProduct);
         if (filters?.lowStockOnly) {
           list = list.filter((p) => p.current_stock <= p.reorder_level);
+          return { products: list, total: list.length };
         }
         return { products: list, total: count ?? list.length };
       }
@@ -236,7 +241,18 @@ export async function updateProductStock(
     }
 
     const store = getProductsStore();
-    const found = store.find((p) => p.id === idOrSku || p.sku === idOrSku || p.name === idOrSku);
+    const isOnline = await isSupabaseAvailable();
+    let found: Product | undefined = store.find((p) => p.id === idOrSku || p.sku === idOrSku || p.name === idOrSku);
+
+    if (isOnline && !found) {
+      const admin = createAdminClient();
+      found = (await findByIdOrCode<Product>(admin, 'products', idOrSku, 'sku')) || undefined;
+      if (!found) {
+        const { data: byName } = await admin.from('products').select('*').ilike('name', idOrSku).limit(1).maybeSingle();
+        if (byName) found = byName as Product;
+      }
+    }
+
     if (!found) {
       return { success: false, error: 'Product not found' };
     }
@@ -253,7 +269,7 @@ export async function updateProductStock(
       sku: found.sku,
       product_name: found.name,
       transaction_type: 'ADJUSTMENT',
-      quantity: delta,
+      quantity: delta === 0 ? 1 : delta,
       previous_stock: prevStock,
       new_stock: newStock,
       user_name: authUser.name,
@@ -262,11 +278,24 @@ export async function updateProductStock(
     };
     getLedgerStore().unshift(ledgerEntry);
 
-    const isOnline = await isSupabaseAvailable();
     if (isOnline) {
       try {
         const admin = createAdminClient();
-        await admin.from('products').update({ current_stock: newStock }).or(`id.eq.${found.id},sku.eq.${found.sku}`);
+        await admin.from('products').update({ current_stock: newStock, updated_at: new Date().toISOString() }).eq('id', found.id);
+        if (delta !== 0) {
+          await admin.from('inventory_transactions').insert({
+            transaction_number: txId,
+            product_id: sanitizeUuid(found.id),
+            sku: found.sku,
+            product_name: found.name,
+            transaction_type: 'ADJUSTMENT',
+            quantity: delta,
+            previous_stock: prevStock,
+            new_stock: newStock,
+            performed_by_name: authUser.name,
+            notes: reason,
+          });
+        }
       } catch (err) {
         console.warn('Supabase stock update failed:', err);
       }
@@ -302,12 +331,26 @@ export async function incrementProductStock(
 ): Promise<{ success: boolean; newStock?: number; error?: string }> {
   try {
     const store = getProductsStore();
-    const found = store.find(
-      (p) =>
-        p.id === idOrSkuOrName ||
-        p.sku === idOrSkuOrName ||
-        p.name.toLowerCase() === idOrSkuOrName.toLowerCase()
-    );
+    const isOnline = await isSupabaseAvailable();
+    let found: Product | undefined;
+
+    if (isOnline) {
+      const admin = createAdminClient();
+      found = (await findByIdOrCode<Product>(admin, 'products', idOrSkuOrName, 'sku')) || undefined;
+      if (!found) {
+        const { data: byName } = await admin.from('products').select('*').ilike('name', idOrSkuOrName).limit(1).maybeSingle();
+        if (byName) found = byName as Product;
+      }
+    }
+
+    if (!found) {
+      found = store.find(
+        (p) =>
+          p.id === idOrSkuOrName ||
+          p.sku === idOrSkuOrName ||
+          p.name.toLowerCase() === idOrSkuOrName.toLowerCase()
+      );
+    }
 
     if (!found) {
       return { success: false, error: `Product '${idOrSkuOrName}' not found in inventory catalog.` };
@@ -344,11 +387,26 @@ export async function incrementProductStock(
       created_at: new Date().toISOString(),
     });
 
-    const isOnline = await isSupabaseAvailable();
     if (isOnline) {
       try {
         const admin = createAdminClient();
-        await admin.from('products').update({ current_stock: targetStock }).or(`id.eq.${found.id},sku.eq.${found.sku}`);
+        await admin.from('products').update({ current_stock: targetStock, updated_at: new Date().toISOString() }).eq('id', found.id);
+        if (incrementBy !== 0) {
+          await admin.from('inventory_transactions').insert({
+            transaction_number: txId,
+            product_id: sanitizeUuid(found.id),
+            sku: found.sku,
+            product_name: found.name,
+            transaction_type: transactionType,
+            quantity: incrementBy,
+            previous_stock: prevStock,
+            new_stock: targetStock,
+            reference_type: referenceType || null,
+            reference_id: referenceId || null,
+            performed_by_name: 'System / Operator',
+            notes: notes || `${transactionType} of ${Math.abs(incrementBy)} units`,
+          });
+        }
       } catch (err) {
         console.warn('Supabase stock increment failed:', err);
       }
@@ -367,6 +425,34 @@ export async function incrementProductStock(
  * Retrieve immutable inventory ledger entries
  */
 export async function getInventoryTransactions(productId?: string): Promise<InventoryTransaction[]> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin.from('inventory_transactions').select('*').order('created_at', { ascending: false }).limit(200);
+      if (productId) {
+        query = query.eq(sanitizeUuid(productId) ? 'product_id' : 'sku', productId);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        return data.map((row: any) => ({
+          id: row.transaction_number || row.id,
+          product_id: row.product_id || '',
+          sku: row.sku,
+          product_name: row.product_name,
+          transaction_type: row.transaction_type,
+          quantity: row.quantity,
+          previous_stock: row.previous_stock,
+          new_stock: row.new_stock,
+          reference_type: row.reference_type || undefined,
+          reference_id: row.reference_id || undefined,
+          user_name: row.performed_by_name,
+          notes: row.notes || undefined,
+          created_at: row.created_at,
+        }));
+      }
+    } catch {}
+  }
+
   const store = getLedgerStore();
   if (productId) {
     return store.filter((t) => t.product_id === productId || t.sku === productId);
@@ -409,7 +495,14 @@ export async function updateProduct(
     const authUser = await requireRole(['Managing Director', 'Admin / BDM']);
 
     const store = getProductsStore();
-    const found = store.find((p) => p.id === idOrSku || p.sku === idOrSku);
+    const isOnline = await isSupabaseAvailable();
+    let found: Product | undefined = store.find((p) => p.id === idOrSku || p.sku === idOrSku);
+
+    if (isOnline && !found) {
+      const admin = createAdminClient();
+      found = (await findByIdOrCode<Product>(admin, 'products', idOrSku, 'sku')) || undefined;
+    }
+
     if (!found) {
       return { success: false, error: 'Product not found in catalog' };
     }
@@ -432,7 +525,6 @@ export async function updateProduct(
     if (values.purchase_depot !== undefined) found.purchase_depot = values.purchase_depot;
     if (values.is_active !== undefined) found.is_active = values.is_active;
 
-    const isOnline = await isSupabaseAvailable();
     if (isOnline) {
       try {
         const admin = createAdminClient();
@@ -458,7 +550,7 @@ export async function updateProduct(
             is_active: found.is_active,
             updated_at: new Date().toISOString(),
           })
-          .or(`id.eq.${found.id},sku.eq.${found.sku}`);
+          .eq('id', found.id);
       } catch (err) {
         console.warn('Supabase updateProduct fallback:', err);
       }

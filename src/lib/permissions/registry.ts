@@ -367,3 +367,34 @@ export function unregisterControlledModule(key: string): { success: boolean; err
   store.splice(idx, 1);
   return { success: true };
 }
+
+/**
+ * Authoritative RBAC check for exporting data via CSV.
+ * Strictly restricted to Managing Director, Admin / BDM, BDM, Accounts Executive, and Store Manager.
+ * Non-privileged roles (e.g. Sales Executive, Field Engineer) are strictly barred from data exfiltration.
+ */
+export function canExportCSV(userRole?: string | null): boolean {
+  if (!userRole) return false;
+  const authorizedRoles = [
+    'Managing Director',
+    'Admin / BDM',
+    'BDM',
+    'Accounts Executive',
+    'Store / Operations Manager',
+  ];
+  return authorizedRoles.includes(userRole);
+}
+
+/**
+ * Authoritative RBAC check for bulk importing data via CSV.
+ * Strictly restricted to Managing Director and Admin / BDM.
+ */
+export function canImportCSV(userRole?: string | null): boolean {
+  if (!userRole) return false;
+  const authorizedRoles = [
+    'Managing Director',
+    'Admin / BDM',
+  ];
+  return authorizedRoles.includes(userRole);
+}
+

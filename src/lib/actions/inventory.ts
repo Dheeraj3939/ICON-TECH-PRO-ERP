@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole, getAuthenticatedUser } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
+import { sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { getProducts } from '@/lib/actions/products';
 import { getSerialRecords } from '@/lib/actions/serials';
 import type {
@@ -215,7 +216,7 @@ export async function recordStockMovement(payload: {
         const admin = createAdminClient();
         await admin.from('stock_movements').insert({
           movement_type: record.movement_type,
-          product_id: record.product_id,
+          product_id: sanitizeUuid(record.product_id),
           product_name: record.product_name,
           quantity: record.quantity,
           previous_stock: record.previous_stock,
@@ -267,15 +268,15 @@ export async function getStockMovements(filters?: {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('stock_movements').select('*').order('created_at', { ascending: false });
+      const admin = createAdminClient();
+      let query = admin.from('stock_movements').select('*').order('created_at', { ascending: false });
 
       if (filters?.productId) query = query.eq('product_id', filters.productId);
       if (filters?.movementType) query = query.eq('movement_type', filters.movementType);
       if (filters?.referenceNumber) query = query.eq('reference_number', filters.referenceNumber);
 
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data as StockMovementRecord[];
       }
     } catch (err) {
@@ -316,10 +317,26 @@ export async function scanAndMoveSerial(payload: {
       return { success: false, error: 'Serial number cannot be empty' };
     }
 
-    // Find previous state
-    const previousEntries = ledgerStore.filter((s) => s.serial_number === serialNum);
-    const lastEntry = previousEntries[0];
-    const previousStatus = lastEntry ? lastEntry.new_status : undefined;
+    // Find previous state (DB-first)
+    let previousStatus: SerialLedgerEntry['new_status'] | undefined;
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const { data: lastDb } = await admin
+          .from('serial_ledger')
+          .select('new_status')
+          .eq('serial_number', serialNum)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (lastDb?.new_status) {
+          previousStatus = lastDb.new_status as SerialLedgerEntry['new_status'];
+        }
+      } catch {}
+    } else {
+      const previousEntries = ledgerStore.filter((s) => s.serial_number === serialNum);
+      previousStatus = previousEntries[0]?.new_status;
+    }
 
     // Validate state transition
     if (previousStatus && previousStatus === payload.new_status) {
@@ -353,7 +370,7 @@ export async function scanAndMoveSerial(payload: {
         const admin = createAdminClient();
         await admin.from('serial_ledger').insert({
           serial_number: entry.serial_number,
-          product_id: entry.product_id || null,
+          product_id: sanitizeUuid(entry.product_id),
           product_name: entry.product_name,
           action: entry.action,
           previous_status: entry.previous_status || null,
@@ -393,13 +410,13 @@ export async function getSerialLedger(serialNumber?: string): Promise<SerialLedg
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('serial_ledger').select('*').order('created_at', { ascending: false });
+      const admin = createAdminClient();
+      let query = admin.from('serial_ledger').select('*').order('created_at', { ascending: false });
       if (serialNumber) {
         query = query.eq('serial_number', serialNumber.trim().toUpperCase());
       }
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data as SerialLedgerEntry[];
       }
     } catch (err) {

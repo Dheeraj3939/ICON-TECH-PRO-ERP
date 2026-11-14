@@ -21,9 +21,11 @@ import {
   Landmark,
 } from 'lucide-react';
 import { PRODUCT_CATEGORIES, STAFF_MEMBERS } from '@/lib/constants/erp-data';
+import { ENQUIRY_SOURCES, isCanonicalEnquirySource } from '@/lib/constants/customer-source';
 import { createEnquiry } from '@/lib/actions/enquiries';
 import { getCustomers } from '@/lib/actions/customers';
 import { getCurrentSessionUser } from '@/lib/actions/users';
+import { CustomerFormModal } from '@/components/customers/customer-form-modal';
 import type { Customer, CustomerType } from '@/types/customer';
 
 interface NewEnquiryModalProps {
@@ -54,10 +56,10 @@ interface CreatedEnquirySummary {
 export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }: NewEnquiryModalProps) {
   const router = useRouter();
 
-  const [customerMode, setCustomerMode] = useState<'SEARCH' | 'MANUAL'>('SEARCH');
   const [existingCustomers, setExistingCustomers] = useState<Customer[]>([]);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     customer_name: initialCustomer?.name || '',
@@ -65,7 +67,7 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
     customer_type: (initialCustomer?.customer_type || 'COMPANY') as CustomerType,
     phone: initialCustomer?.phone || '',
     email: initialCustomer?.email || '',
-    source: 'Direct',
+    source: (initialCustomer as any)?.enquiry_source || 'Walk-in',
     salesperson_name: 'Dheeraj',
     product_category: 'Projector',
     requirement_summary: '',
@@ -105,13 +107,33 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
           const matched = res.customers.find(c => c.id === initialCustomer.id);
           if (matched) {
             setSelectedCustomer(matched);
-            setCustomerMode('SEARCH');
           }
         }
       }
     }).catch(console.error);
     return () => { isMounted = false; };
   }, [isOpen, initialCustomer]);
+
+  // Debounced server-side customer lookup across all 3,000+ Tally master records
+  useEffect(() => {
+    if (!customerSearchQuery.trim()) return;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await getCustomers({ search: customerSearchQuery.trim() });
+        if (res && res.customers) {
+          setExistingCustomers(prev => {
+            const map = new Map<string, Customer>();
+            for (const c of res.customers) map.set(c.id, c);
+            for (const c of prev) if (!map.has(c.id)) map.set(c.id, c);
+            return Array.from(map.values());
+          });
+        }
+      } catch (err) {
+        console.error('Customer search error:', err);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [customerSearchQuery]);
 
   const matchedCustomers = useMemo(() => {
     if (!customerSearchQuery.trim()) return [];
@@ -135,6 +157,7 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
       phone: c.phone,
       email: c.email || '',
       site_address: c.billing_address || (c.city ? `${c.city}, ${c.state}` : ''),
+      source: c.enquiry_source || 'Existing Customers',
     }));
     setCustomerSearchQuery('');
   };
@@ -157,14 +180,13 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
   const handleResetForm = () => {
     setSelectedCustomer(null);
     setCustomerSearchQuery('');
-    setCustomerMode('SEARCH');
     setFormData({
       customer_name: '',
       company_name: '',
       customer_type: 'COMPANY',
       phone: '',
       email: '',
-      source: 'Direct',
+      source: (initialCustomer as any)?.enquiry_source || 'Walk-in',
       salesperson_name: 'Dheeraj',
       product_category: 'Projector',
       requirement_summary: '',
@@ -195,16 +217,22 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
     setIsSubmitting(true);
     setErrorMessage(null);
 
+    if (!selectedCustomer) {
+      setErrorMessage('Every enquiry must be linked to a registered Customer Master record. Please search and select an existing customer, or click "+ Create Customer" to register them.');
+      setIsSubmitting(false);
+      return;
+    }
+
     const requiresSiteVisit = nextAction === 'SITE_VISIT' ? true : formData.site_visit_required;
 
     try {
       const res = await createEnquiry({
-        customer_id: selectedCustomer ? selectedCustomer.id : 'CUST-NEW',
-        customer_name: formData.customer_name.trim(),
-        company_name: formData.company_name.trim() || undefined,
-        customer_type: formData.customer_type,
-        phone: formData.phone.trim(),
-        email: formData.email.trim() || undefined,
+        customer_id: selectedCustomer.id,
+        customer_name: (selectedCustomer.customer_name || formData.customer_name).trim(),
+        company_name: (selectedCustomer.company_name || formData.company_name || '').trim() || undefined,
+        customer_type: selectedCustomer.customer_type || formData.customer_type,
+        phone: (selectedCustomer.phone || formData.phone).trim(),
+        email: (selectedCustomer.email || formData.email || '').trim() || undefined,
         source: formData.source,
         salesperson_name: formData.salesperson_name,
         product_category: formData.product_category,
@@ -220,7 +248,7 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
 
         if (nextAction === 'QUOTE') {
           handleClose();
-          router.push(`/dashboard/quotations?enquiry_id=${res.data.id}&customer_id=${res.data.customer_id || ''}`);
+          router.push(`/dashboard/quotations/new?enquiry_id=${res.data.id}&customer_id=${res.data.customer_id || ''}`);
           return;
         }
 
@@ -356,7 +384,7 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
                   type="button"
                   onClick={() => {
                     handleClose();
-                    router.push('/dashboard/quotations');
+                    router.push(`/dashboard/quotations/new?enquiry_id=${createdSummary.enquiry_number}&customer_name=${encodeURIComponent(createdSummary.customer_name)}`);
                   }}
                   className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40 text-left transition group cursor-pointer"
                 >
@@ -413,7 +441,7 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
               {/* Existing Customer Auto-Suggest Search or Linked Customer Badge */}
               {selectedCustomer ? (
-                <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between shadow-xs">
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold">
                       <Check className="w-4 h-4" />
@@ -441,13 +469,20 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
                   </button>
                 </div>
               ) : (
-                <div className="space-y-1.5 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="space-y-2 p-4 rounded-2xl bg-slate-50 border border-slate-200">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                       <Search className="w-3.5 h-3.5 text-brand-600" />
-                      <span>Search Registered Customer (Autofill)</span>
+                      <span>Select Registered Customer Master <span className="text-rose-500">*</span></span>
                     </label>
-                    <span className="text-[11px] text-slate-400">Matches ID, Name, Company, Phone</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomerModalOpen(true)}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-brand-600 hover:text-brand-800 bg-brand-50 hover:bg-brand-100 px-2.5 py-1 rounded-lg border border-brand-200 transition cursor-pointer shadow-xs"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      <span>+ Create Customer</span>
+                    </button>
                   </div>
                   <div className="relative">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -455,8 +490,8 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
                       type="text"
                       value={customerSearchQuery}
                       onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                      placeholder="Type Customer ID (e.g. ICON260001), Company Name, or Phone..."
-                      className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+                      placeholder="Type Customer ID (ICON26XXXX), Company Name, Contact Person, or Phone..."
+                      className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
                     />
                     {matchedCustomers.length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto divide-y divide-slate-100">
@@ -480,39 +515,73 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
                                 {c.contact_person ? `${c.contact_person} • ` : ''}{c.phone} {c.email ? `• ${c.email}` : ''}
                               </span>
                             </div>
-                            <span className="text-[10px] font-bold text-brand-600 group-hover:underline">Autofill &rarr;</span>
+                            <span className="text-[10px] font-bold text-brand-600 group-hover:underline">Select Customer &rarr;</span>
                           </button>
                         ))}
                       </div>
                     )}
                   </div>
+                  {customerSearchQuery.trim() && matchedCustomers.length === 0 && (
+                    <div className="p-3 bg-amber-50/60 border border-dashed border-amber-200 rounded-xl flex items-center justify-between">
+                      <span className="text-xs text-amber-900 font-medium">
+                        Customer &ldquo;{customerSearchQuery}&rdquo; not registered in Master.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsCustomerModalOpen(true)}
+                        className="px-3 py-1 bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold rounded-lg transition cursor-pointer shadow-sm"
+                      >
+                        + Create Customer
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Customer / Contact Person *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Customer / Contact Person <span className="text-rose-500">*</span>
+                    </label>
+                    {selectedCustomer && (
+                      <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-medium border border-emerald-200">
+                        Master Synced
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     required
+                    readOnly={Boolean(selectedCustomer)}
                     value={formData.customer_name}
                     onChange={(e) => setFormData({ ...formData, customer_name: e.target.value })}
                     placeholder="e.g. Rajesh Sharma"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+                    className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none ${
+                      selectedCustomer ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''
+                    }`}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Company Name (Optional)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Company Legal Name
+                    </label>
+                    {selectedCustomer && (
+                      <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-medium border border-emerald-200">
+                        Master Synced
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
+                    readOnly={Boolean(selectedCustomer)}
                     value={formData.company_name}
                     onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
                     placeholder="e.g. Swan Solutions & Services"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+                    className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none ${
+                      selectedCustomer ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''
+                    }`}
                   />
                 </div>
               </div>
@@ -521,9 +590,12 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Customer Classification</label>
                   <select
+                    disabled={Boolean(selectedCustomer)}
                     value={formData.customer_type}
                     onChange={(e) => setFormData({ ...formData, customer_type: e.target.value as any })}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+                    className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none ${
+                      selectedCustomer ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''
+                    }`}
                   >
                     <option value="COMPANY">Corporate / B2B Company</option>
                     <option value="INDIVIDUAL">Individual / Residential Project</option>
@@ -531,24 +603,30 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number *</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number <span className="text-rose-500">*</span></label>
                   <input
                     type="tel"
                     required
+                    readOnly={Boolean(selectedCustomer)}
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="+91 98490 12345"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+                    className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none ${
+                      selectedCustomer ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''
+                    }`}
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address</label>
                   <input
                     type="email"
+                    readOnly={Boolean(selectedCustomer)}
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     placeholder="contact@example.com"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+                    className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none ${
+                      selectedCustomer ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''
+                    }`}
                   />
                 </div>
               </div>
@@ -591,11 +669,16 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
                     onChange={(e) => setFormData({ ...formData, source: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
                   >
-                    <option value="Direct">Direct Walk-in</option>
-                    <option value="Website">Website Form</option>
-                    <option value="Reference">Reference / Referral</option>
-                    <option value="Phone">Inbound Phone Call</option>
-                    <option value="Existing Customer">Existing Customer</option>
+                    {!isCanonicalEnquirySource(formData.source) && formData.source && (
+                      <option value={formData.source}>
+                        {formData.source} (Historical / Legacy)
+                      </option>
+                    )}
+                    {ENQUIRY_SOURCES.map((source) => (
+                      <option key={source} value={source}>
+                        {source}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -783,6 +866,18 @@ export function NewEnquiryModal({ isOpen, onClose, onSuccess, initialCustomer }:
         )}
 
       </div>
+
+      {isCustomerModalOpen && (
+        <CustomerFormModal
+          isOpen={isCustomerModalOpen}
+          onClose={() => setIsCustomerModalOpen(false)}
+          onSuccess={(newCust) => {
+            setExistingCustomers((prev) => [newCust, ...prev]);
+            handleSelectExistingCustomer(newCust);
+            setIsCustomerModalOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

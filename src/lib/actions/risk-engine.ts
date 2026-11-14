@@ -1,6 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { isUuid } from '@/lib/supabase/db-helpers';
+import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { getCustomerReceivablesLedger } from '@/lib/actions/finance';
@@ -200,6 +203,20 @@ export async function getBusinessRisks(filters?: {
   status?: string;
 }): Promise<{ success: boolean; data?: BusinessRiskAlert[]; error?: string }> {
   try {
+    if (await isSupabaseAvailable()) {
+      const admin = createAdminClient();
+      let query = admin
+        .from('business_risk_alerts')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (filters?.severity) query = query.eq('severity', filters.severity);
+      if (filters?.status) query = query.eq('status', filters.status);
+      const { data, error } = await query;
+      if (!error && data) {
+        return { success: true, data: data as BusinessRiskAlert[] };
+      }
+    }
+
     const store = getRiskStore();
     let filtered = [...store];
 
@@ -226,14 +243,19 @@ export async function acknowledgeRisk(id: string): Promise<{
 }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Accounts', 'BDM']);
-    const store = getRiskStore();
-    const alert = store.find((r) => r.id === id);
+    const { data: list } = await getBusinessRisks();
+    const alert = (list || []).find((r) => r.id === id);
 
     if (!alert) {
       return { success: false, error: 'Risk alert not found.' };
     }
 
     alert.status = 'ACKNOWLEDGED';
+
+    if (await isSupabaseAvailable() && isUuid(id)) {
+      const admin = createAdminClient();
+      await admin.from('business_risk_alerts').update({ status: 'ACKNOWLEDGED' }).eq('id', id);
+    }
 
     await logAuditEvent({
       userName: authUser.name,
@@ -257,8 +279,8 @@ export async function resolveRisk(
 ): Promise<{ success: boolean; data?: BusinessRiskAlert; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Accounts', 'BDM']);
-    const store = getRiskStore();
-    const alert = store.find((r) => r.id === id);
+    const { data: list } = await getBusinessRisks();
+    const alert = (list || []).find((r) => r.id === id);
 
     if (!alert) {
       return { success: false, error: 'Risk alert not found.' };
@@ -266,6 +288,14 @@ export async function resolveRisk(
 
     alert.status = 'RESOLVED';
     alert.recommendation = (alert.recommendation ? alert.recommendation + ' | ' : '') + `Resolved by ${authUser.name}: ${notes}`;
+
+    if (await isSupabaseAvailable() && isUuid(id)) {
+      const admin = createAdminClient();
+      await admin
+        .from('business_risk_alerts')
+        .update({ status: 'RESOLVED', recommendation: alert.recommendation })
+        .eq('id', id);
+    }
 
     await logAuditEvent({
       userName: authUser.name,

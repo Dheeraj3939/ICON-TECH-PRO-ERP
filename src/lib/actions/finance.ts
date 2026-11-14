@@ -1,8 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isUuid, sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole, getAuthenticatedUser } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
@@ -174,6 +174,7 @@ export async function getCustomerReceivablesLedger(
   customerId?: string
 ): Promise<{ success: boolean; data?: CustomerReceivableSummary[]; error?: string }> {
   try {
+    await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
     const { customers } = await getCustomers();
     const { invoices } = await getInvoices();
     const ptpStore = getPromisesToPayStore();
@@ -265,6 +266,7 @@ export async function getSupplierPayablesLedger(): Promise<{
   error?: string;
 }> {
   try {
+    await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
     const supRes = await getSupplierInvoices();
     const supInvoices = supRes.invoices || [];
     const grouped: Record<string, { name: string; items: SupplierInvoice[] }> = {};
@@ -335,10 +337,8 @@ export async function allocatePaymentAcrossInvoices(payload: {
     const invoicesStore = invoicesRes.invoices;
     const allocStore = getAllocationsStore();
 
-    // 1. Validate total allocation does not exceed payment receipt amount
-    const totalAllocatedSoFar = allocStore
-      .filter((a) => a.payment_id === payment.id || a.payment_number === payment.payment_number)
-      .reduce((s, a) => s + a.allocated_amount, 0);
+    const existingAllocations = await getPaymentAllocations(payment.id);
+    const totalAllocatedSoFar = existingAllocations.reduce((s, a) => s + a.allocated_amount, 0);
 
     const availableToAllocate = Number((payment.amount - totalAllocatedSoFar).toFixed(2));
     const requestedTotal = payload.allocations.reduce((s, a) => s + a.amount, 0);
@@ -356,6 +356,8 @@ export async function allocatePaymentAcrossInvoices(payload: {
 
     // 2. Validate each invoice balance
     const createdAllocations: PaymentAllocation[] = [];
+    const isOnline = await isSupabaseAvailable();
+    const admin = isOnline ? createAdminClient() : null;
 
     for (const alloc of payload.allocations) {
       const inv = invoicesStore.find((i) => i.id === alloc.invoice_id || i.invoice_number === alloc.invoice_id);
@@ -384,6 +386,33 @@ export async function allocatePaymentAcrossInvoices(payload: {
         allocated_amount: alloc.amount,
         created_at: new Date().toISOString(),
       };
+
+      if (admin) {
+        try {
+          if (isUuid(inv.id)) {
+            await admin
+              .from('invoices')
+              .update({ paid_amount: inv.paid_amount, status: inv.status })
+              .eq('id', inv.id);
+          }
+          if (isUuid(payment.id) && isUuid(inv.id)) {
+            const { data: insertedAlloc } = await admin
+              .from('payment_allocations')
+              .insert({
+                payment_id: payment.id,
+                payment_number: payment.payment_number,
+                invoice_id: inv.id,
+                invoice_number: inv.invoice_number,
+                allocated_amount: alloc.amount,
+              })
+              .select('id')
+              .single();
+            if (insertedAlloc?.id) allocationRecord.id = insertedAlloc.id;
+          }
+        } catch (dbErr) {
+          console.warn('Supabase payment allocation fallback:', dbErr);
+        }
+      }
 
       allocStore.push(allocationRecord);
       createdAllocations.push(allocationRecord);
@@ -426,10 +455,11 @@ export async function recordAdvancePayment(payload: {
     }
 
     const payNumber = await getNextPaymentNumber();
+    const { payments: existingPayments } = await getPayments();
     const paymentsStore: Payment[] = globalThis.__ICON_PAYMENTS__ || [];
 
     // Duplicate reference check
-    const duplicate = paymentsStore.find(
+    const duplicate = existingPayments.find(
       (p) => p.reference_number.toLowerCase() === payload.reference_number.trim().toLowerCase()
     );
     if (duplicate) {
@@ -453,6 +483,32 @@ export async function recordAdvancePayment(payload: {
       recorded_by_name: authUser.name,
       created_at: new Date().toISOString(),
     };
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const { data: insertedPay } = await admin
+          .from('payments')
+          .insert({
+            payment_number: payNumber,
+            customer_id: sanitizeUuid(payload.customer_id),
+            customer_name: payment.customer_name,
+            company_name: payment.company_name || null,
+            payment_date: payment.payment_date,
+            amount: payment.amount,
+            mode: payment.mode,
+            reference_number: payment.reference_number,
+            bank_name: payment.bank_name || null,
+            recorded_by_name: authUser.name,
+            notes: payment.notes || null,
+          })
+          .select('id')
+          .single();
+        if (insertedPay?.id) payment.id = insertedPay.id;
+      } catch (dbErr) {
+        console.warn('Supabase recordAdvancePayment fallback:', dbErr);
+      }
+    }
 
     paymentsStore.unshift(payment);
 
@@ -500,6 +556,32 @@ export async function recordPromiseToPay(payload: {
     };
 
     ptpStore.unshift(record);
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        let resolvedCustomerName = payload.customer_id;
+        if (isUuid(payload.customer_id)) {
+          const { data: cust } = await admin
+            .from('customers')
+            .select('customer_name')
+            .eq('id', payload.customer_id)
+            .maybeSingle();
+          if (cust?.customer_name) resolvedCustomerName = cust.customer_name;
+        }
+        await admin.from('promises_to_pay').insert({
+          customer_id: payload.customer_id,
+          customer_name: resolvedCustomerName,
+          promised_amount: payload.promised_amount,
+          promised_date: payload.promised_date,
+          status: 'PENDING',
+          notes: payload.notes || null,
+          recorded_by: userName,
+        });
+      } catch (dbErr) {
+        console.warn('Supabase promises_to_pay fallback:', dbErr);
+      }
+    }
 
     await logAuditEvent({
       userName,
@@ -569,6 +651,42 @@ export async function createCreditNote(payload: {
     if (inv.balance_amount === 0) inv.status = 'Paid';
 
     cnStore.unshift(creditNote);
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        if (isUuid(inv.id) && isUuid(inv.customer_id)) {
+          const { data: insertedCn } = await admin
+            .from('credit_notes')
+            .insert({
+              credit_note_number: cnNumber,
+              invoice_id: inv.id,
+              invoice_number: inv.invoice_number,
+              customer_id: inv.customer_id,
+              customer_name: inv.customer_name,
+              total_amount: creditNote.total_amount,
+              cgst_amount: creditNote.cgst_amount,
+              sgst_amount: creditNote.sgst_amount,
+              igst_amount: creditNote.igst_amount,
+              reason: creditNote.reason,
+              status: 'ISSUED',
+              created_by_name: authUser.name,
+            })
+            .select('id')
+            .single();
+          if (insertedCn?.id) creditNote.id = insertedCn.id;
+        }
+        if (isUuid(inv.id)) {
+          const nextPaid = Number(((inv.paid_amount || 0) + payload.amount).toFixed(2));
+          await admin
+            .from('invoices')
+            .update({ paid_amount: Math.min(inv.grand_total, nextPaid), status: inv.status })
+            .eq('id', inv.id);
+        }
+      } catch (dbErr) {
+        console.warn('Supabase credit_notes fallback:', dbErr);
+      }
+    }
 
     await logAuditEvent({
       userName: authUser.name,
@@ -641,6 +759,33 @@ export async function createDebitNote(payload: {
 
     dnStore.unshift(debitNote);
 
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const { data: insertedDn } = await admin
+          .from('debit_notes')
+          .insert({
+            debit_note_number: dnNumber,
+            supplier_invoice_id: sinv.id,
+            supplier_invoice_number: sinv.invoice_number,
+            supplier_id: sinv.supplier_id || 'SUP001',
+            supplier_name: sinv.supplier_name,
+            total_amount: debitNote.total_amount,
+            cgst_amount: debitNote.cgst_amount,
+            sgst_amount: debitNote.sgst_amount,
+            igst_amount: debitNote.igst_amount,
+            reason: debitNote.reason,
+            status: 'ISSUED',
+            created_by_name: authUser.name,
+          })
+          .select('id')
+          .single();
+        if (insertedDn?.id) debitNote.id = insertedDn.id;
+      } catch (dbErr) {
+        console.warn('Supabase debit_notes fallback:', dbErr);
+      }
+    }
+
     await logAuditEvent({
       userName: authUser.name,
       action: 'ISSUE_DEBIT_NOTE',
@@ -655,14 +800,56 @@ export async function createDebitNote(payload: {
 }
 
 export async function getCreditNotes(): Promise<CreditNote[]> {
+  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const { data, error } = await admin
+        .from('credit_notes')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data) return data as CreditNote[];
+    } catch {
+      // Fallback
+    }
+  }
   return getCreditNotesStore();
 }
 
 export async function getDebitNotes(): Promise<DebitNote[]> {
+  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const { data, error } = await admin
+        .from('debit_notes')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data) return data as DebitNote[];
+    } catch {
+      // Fallback
+    }
+  }
   return getDebitNotesStore();
 }
 
 export async function getPaymentAllocations(paymentId?: string): Promise<PaymentAllocation[]> {
+  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin.from('payment_allocations').select('*').order('created_at', { ascending: false });
+      if (paymentId) {
+        query = isUuid(paymentId)
+          ? query.eq('payment_id', paymentId)
+          : query.eq('payment_number', paymentId);
+      }
+      const { data, error } = await query;
+      if (!error && data) return data as PaymentAllocation[];
+    } catch {
+      // Fallback
+    }
+  }
   const store = getAllocationsStore();
   if (paymentId) {
     return store.filter((a) => a.payment_id === paymentId || a.payment_number === paymentId);

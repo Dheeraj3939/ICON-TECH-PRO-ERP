@@ -1,5 +1,8 @@
 'use server';
 
+import { createAdminClient } from '@/lib/supabase/admin';
+import { isUuid } from '@/lib/supabase/db-helpers';
+import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { getCustomers } from '@/lib/actions/customers';
@@ -126,6 +129,21 @@ export async function getCustomerOpportunities(customerId?: string): Promise<{
   error?: string;
 }> {
   try {
+    if (await isSupabaseAvailable()) {
+      const admin = createAdminClient();
+      let query = admin
+        .from('customer_opportunities')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (customerId) {
+        query = query.eq('customer_id', customerId);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        return { success: true, data: data as CustomerOpportunity[] };
+      }
+    }
+
     const store = getOppStore();
     let filtered = [...store];
 
@@ -148,14 +166,19 @@ export async function updateOpportunityStatus(
 ): Promise<{ success: boolean; data?: CustomerOpportunity; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
-    const store = getOppStore();
-    const opp = store.find((o) => o.id === id);
+    const { data: list } = await getCustomerOpportunities();
+    const opp = (list || []).find((o) => o.id === id);
 
     if (!opp) {
       return { success: false, error: 'Opportunity not found.' };
     }
 
     opp.status = status;
+
+    if (await isSupabaseAvailable() && isUuid(id)) {
+      const admin = createAdminClient();
+      await admin.from('customer_opportunities').update({ status }).eq('id', id);
+    }
 
     await logAuditEvent({
       userName: authUser.name,

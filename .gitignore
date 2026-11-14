@@ -9,6 +9,7 @@
 
 # next.js
 /.next/
+/.next-uat/
 /out/
 
 # production
@@ -27,7 +28,17 @@ yarn-error.log*
 .env*.local
 .env.local
 .env
+env.uat.local*
+env.*
+*.backup
+*.local
+!*.example
 !.env.example
+
+# scratch and backups
+scratch/
+backups/
+
 
 # vercel
 .vercel
@@ -37,3 +48,7 @@ yarn-error.log*
 next-env.d.ts
 
 supabase/.temp/
+
+# local credential caches - NEVER COMMIT CREDENTIALS
+data/
+data/credentials-store.json

@@ -18,12 +18,10 @@ function getEncryptionKey(): Buffer {
     return crypto.createHash('sha256').update(envKey.trim()).digest();
   }
 
-  // Fallback to hashing SESSION_SECRET or SUPABASE_SECRET_KEY
-  const fallbackSecret =
-    process.env.SESSION_SECRET ||
-    process.env.SUPABASE_SECRET_KEY ||
-    'ICON-TECH-PRO-ERP-ZOHO-ENC-FALLBACK-V9.1';
-  return crypto.createHash('sha256').update(fallbackSecret).digest();
+  throw new Error(
+    '[ZOHO SECURITY CONFIG ERROR] ZOHO_TOKEN_ENCRYPTION_KEY is not configured or is under 32 bytes. ' +
+    'Token encryption/decryption is disabled. Do not reuse database credentials or static fallbacks.'
+  );
 }
 
 /**

@@ -4,10 +4,20 @@ import { STAFF_MEMBERS } from '@/lib/constants/erp-data';
 import type { UserRoleName } from '@/types/database';
 
 export async function GET(request: NextRequest) {
-  // P0 Security Guard: Disable synthetic auth cookie creation in production
-  if (process.env.NODE_ENV === 'production' && !process.env.ALLOW_DEV_AUTH_BYPASS) {
+  // P0 Security Guard: Strictly disable synthetic auth cookie creation in UAT and production
+  const isUat = process.env.NEXT_PUBLIC_ERP_ENV?.trim().toUpperCase() === 'UAT';
+  const isProd =
+    process.env.NODE_ENV === 'production' ||
+    process.env.NEXT_PUBLIC_ERP_ENV?.trim().toUpperCase() === 'PRODUCTION';
+
+  if (isUat || isProd) {
     return NextResponse.json(
-      { success: false, error: 'Synthetic auth endpoint is disabled in production environments.' },
+      {
+        success: false,
+        error: isUat
+          ? 'Synthetic auth endpoint is strictly disabled in UAT. Real Supabase Auth credentials are required.'
+          : 'Synthetic auth endpoint is strictly disabled in production environments.',
+      },
       { status: 403 }
     );
   }

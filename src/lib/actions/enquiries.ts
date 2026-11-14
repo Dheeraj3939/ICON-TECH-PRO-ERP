@@ -6,9 +6,10 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { INITIAL_ENQUIRIES } from '@/lib/constants/erp-data';
 import { getNextEnquiryNumber } from '@/lib/utils/sequence';
-import { requireRole } from '@/lib/auth/session';
+import { requireRole, requireAuth } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { createCustomer } from '@/lib/actions/customers';
+import { findByIdOrCode, sanitizeSearchTerm } from '@/lib/supabase/db-helpers';
 import type { Enquiry, EnquiryStatus } from '@/types/erp';
 import type { EnquiryFormValues } from '@/lib/validations/erp';
 
@@ -29,14 +30,16 @@ export async function getEnquiries(filters?: {
   status?: string;
   search?: string;
   salesperson?: string;
+  customer_id?: string;
 }): Promise<{ enquiries: Enquiry[]; total: number }> {
+  await requireAuth();
   const store = getEnquiriesStore();
 
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('enquiries').select('*', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('enquiries').select('*', { count: 'exact' });
 
       if (filters?.status && filters.status !== 'ALL') {
         query = query.eq('status', filters.status);
@@ -44,11 +47,16 @@ export async function getEnquiries(filters?: {
       if (filters?.salesperson && filters.salesperson !== 'ALL') {
         query = query.eq('salesperson_name', filters.salesperson);
       }
+      if (filters?.customer_id) {
+        query = query.eq('customer_id', filters.customer_id);
+      }
       if (filters?.search) {
-        const s = filters.search.trim();
-        query = query.or(
-          `enquiry_number.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,product_category.ilike.%${s}%`
-        );
+        const s = sanitizeSearchTerm(filters.search);
+        if (s) {
+          query = query.or(
+            `enquiry_number.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,product_category.ilike.%${s}%`
+          );
+        }
       }
 
       query = query.order('created_at', { ascending: false });
@@ -70,7 +78,14 @@ export async function getEnquiries(filters?: {
   if (filters?.salesperson && filters.salesperson !== 'ALL') {
     filtered = filtered.filter((e) => e.salesperson_name === filters.salesperson);
   }
-  if (filters?.search) {
+  if (filters?.customer_id) {
+    const s = (filters.search || '').toLowerCase().trim();
+    filtered = filtered.filter(
+      (e) =>
+        e.customer_id === filters.customer_id ||
+        (s && (e.customer_name.toLowerCase().includes(s) || (e.company_name && e.company_name.toLowerCase().includes(s))))
+    );
+  } else if (filters?.search) {
     const s = filters.search.toLowerCase().trim();
     filtered = filtered.filter(
       (e) =>
@@ -238,6 +253,26 @@ export async function createEnquiry(
             module: 'ENQUIRIES',
             details: `Created enquiry ${generatedNumber} for ${payload.customer_name} (Cust: ${customerCode || 'Auto'})`,
           });
+
+          // Trigger automated customer acknowledgement email if email provided
+          if (payload.email) {
+            try {
+              const { enqueueAutomatedEmail, processEmailQueue } = await import('@/lib/actions/email-automation');
+              await enqueueAutomatedEmail({
+                trigger_type: 'ENQUIRY_ACK',
+                recipient_type: 'CUSTOMER',
+                recipient_email: payload.email,
+                recipient_name: payload.customer_name,
+                entity_type: 'ENQUIRY',
+                entity_id: data.id,
+                entity_number: generatedNumber,
+              });
+              processEmailQueue().catch(() => {});
+            } catch (emErr) {
+              console.warn('Enquiry automated email trigger warning:', emErr);
+            }
+          }
+
           revalidatePath('/dashboard/enquiries');
           revalidatePath('/dashboard/customers');
           revalidatePath('/dashboard');
@@ -296,10 +331,17 @@ export async function updateEnquiryStatus(
     if (isOnline) {
       try {
         const admin = createAdminClient();
-        await admin
+        const dbFound = await findByIdOrCode<Enquiry>(admin, 'enquiries', id, 'enquiry_number');
+        if (!dbFound) {
+          return { success: false, error: 'Enquiry record not found' };
+        }
+        const { error: updErr } = await admin
           .from('enquiries')
           .update({ status, loss_reason: lossReason || null, updated_at: new Date().toISOString() })
-          .or(`id.eq.${id},enquiry_number.eq.${id}`);
+          .eq('id', dbFound.id);
+        if (updErr) {
+          return { success: false, error: `Failed to update enquiry status: ${updErr.message}` };
+        }
       } catch (err) {
         console.warn('Supabase updateEnquiryStatus failed:', err);
       }
@@ -364,7 +406,15 @@ export async function updateEnquiry(
     ]);
 
     const store = getEnquiriesStore();
-    const found = store.find((e) => e.id === id || e.enquiry_number === id);
+    const isOnline = await isSupabaseAvailable();
+    let found: Enquiry | undefined = store.find((e) => e.id === id || e.enquiry_number === id);
+
+    if (isOnline && !found) {
+      const admin = createAdminClient();
+      const dbFound = await findByIdOrCode<Enquiry>(admin, 'enquiries', id, 'enquiry_number');
+      if (dbFound) found = dbFound;
+    }
+
     if (!found) {
       return { success: false, error: 'Enquiry record not found' };
     }
@@ -392,11 +442,10 @@ export async function updateEnquiry(
       });
     }
 
-    const isOnline = await isSupabaseAvailable();
     if (isOnline) {
       try {
         const admin = createAdminClient();
-        await admin
+        const { error: updErr } = await admin
           .from('enquiries')
           .update({
             customer_name: found.customer_name,
@@ -414,7 +463,10 @@ export async function updateEnquiry(
             status: found.status,
             updated_at: new Date().toISOString(),
           })
-          .or(`id.eq.${id},enquiry_number.eq.${id}`);
+          .eq('id', found.id);
+        if (updErr) {
+          return { success: false, error: `Failed to update enquiry: ${updErr.message}` };
+        }
       } catch (err) {
         console.warn('Supabase updateEnquiry failed, using store:', err);
       }

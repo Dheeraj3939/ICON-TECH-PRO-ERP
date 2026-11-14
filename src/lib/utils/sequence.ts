@@ -120,6 +120,28 @@ export function getIndianFinancialYear(date: Date = new Date()): string {
 }
 
 /**
+ * Returns Indian Financial Year string with 4-digit start year: e.g. '2026-27'
+ */
+export function getIndianFinancialYearFull(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+
+  let startYear: number;
+  let endYear: number;
+
+  if (month >= 3) {
+    startYear = year;
+    endYear = year + 1;
+  } else {
+    startYear = year - 1;
+    endYear = year;
+  }
+
+  const endYY = endYear.toString().slice(-2);
+  return `${startYear}-${endYY}`;
+}
+
+/**
  * Atomic customer code generator: ICONYYXXXX (e.g. ICON260001, ICON260002)
  * Concurrency-safe across multi-instance and local stores.
  */
@@ -406,11 +428,12 @@ export async function getNextDebitNoteNumber(): Promise<string> {
 }
 
 /**
- * Atomic Delivery Challan generator: ICON/26-27/DC-0001
+ * Atomic Delivery Challan generator: ITP/DC/2026-27/0001
+ * Concurrency-safe, multi-instance resilient.
  */
 export async function getNextDeliveryChallanNumber(): Promise<string> {
-  const fy = getIndianFinancialYear();
-  const prefix = `ICON/${fy}/DC-`;
+  const fy = getIndianFinancialYearFull();
+  const prefix = `ITP/DC/${fy}/`;
 
   const dbCode = await fetchDatabaseSequence('DC', prefix);
   if (dbCode) return dbCode;
@@ -424,11 +447,13 @@ export async function getNextDeliveryChallanNumber(): Promise<string> {
 }
 
 /**
- * Atomic Proforma Invoice generator: ICON/26-27/PI-0001
+ * Atomic Proforma Invoice generator: ITP/PI/2026-27/0001
+ * Mandatory standard format: ITP/PI/YYYY-YY/XXXX
+ * Concurrency-safe, multi-instance resilient.
  */
-export async function getNextProformaInvoiceNumber(): Promise<string> {
-  const fy = getIndianFinancialYear();
-  const prefix = `ICON/${fy}/PI-`;
+export async function getNextProformaNumber(): Promise<string> {
+  const fy = getIndianFinancialYearFull();
+  const prefix = `ITP/PI/${fy}/`;
 
   const dbCode = await fetchDatabaseSequence('PI', prefix);
   if (dbCode) return dbCode;
@@ -439,6 +464,13 @@ export async function getNextProformaInvoiceNumber(): Promise<string> {
     const seqStr = store.proforma.toString().padStart(4, '0');
     return `${prefix}${seqStr}`;
   });
+}
+
+/**
+ * Backward-compatible alias for getNextProformaNumber
+ */
+export async function getNextProformaInvoiceNumber(): Promise<string> {
+  return getNextProformaNumber();
 }
 
 /**

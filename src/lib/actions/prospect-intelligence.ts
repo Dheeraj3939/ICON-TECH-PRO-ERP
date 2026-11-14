@@ -1,7 +1,6 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { logAuditEvent } from '@/lib/audit/logger';
@@ -400,7 +399,7 @@ function normalizeCompanyName(name: string): string {
 // ---------------------------------------------------------------------------
 export async function getProspectCampaigns(): Promise<ProspectCampaign[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
     const { data, error } = await supabase
       .from('prospect_campaigns')
       .select('*')
@@ -422,7 +421,7 @@ export async function createProspectCampaign(payload: {
   target_criteria?: Record<string, any>;
 }): Promise<{ success: boolean; campaign?: ProspectCampaign; error?: string }> {
   try {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
     const newCamp: Partial<ProspectCampaign> = {
       name: payload.name,
       target_industry: payload.target_industry,
@@ -497,7 +496,7 @@ export async function checkProspectDuplicate(
 
   // 2. Check existing CRM customers (to prevent duplicate research on active customers)
   try {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
     const { data: customerData } = await supabase
       .from('customers')
       .select('id, name, email, company_name')
@@ -537,7 +536,7 @@ export async function getProspectCompanies(filter?: {
   search?: string;
 }): Promise<ProspectCompany[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
     let query = supabase.from('prospect_companies').select('*');
 
     if (filter?.campaign_id) {
@@ -569,7 +568,7 @@ export async function getProspectCompanies(filter?: {
 
 export async function getProspectCompanyById(id: string): Promise<ProspectCompany | null> {
   try {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
     const { data, error } = await supabase
       .from('prospect_companies')
       .select('*')
@@ -624,7 +623,7 @@ export async function createProspectCompany(payload: {
       latest_run_number: 0,
     };
 
-    const supabase = await createClient();
+    const supabase = createAdminClient();
     const { data, error } = await supabase
       .from('prospect_companies')
       .insert(newRecord)
@@ -841,7 +840,7 @@ export async function executeResearchRun(
 
     // Persist to Supabase if available
     try {
-      const supabase = await createClient();
+      const supabase = createAdminClient();
       await supabase.from('prospect_research_runs').insert({
         id: runId,
         company_id: companyId,
@@ -897,7 +896,7 @@ export async function getProspectDossier(
   // Try fetching from DB if runs empty
   if (runs.length === 0) {
     try {
-      const supabase = await createClient();
+      const supabase = createAdminClient();
       const { data } = await supabase
         .from('prospect_research_runs')
         .select('*')
@@ -1015,7 +1014,7 @@ export async function updateFindingVerification(payload: {
       }
 
       try {
-        const supabase = await createClient();
+        const supabase = createAdminClient();
         await supabase
           .from('prospect_decision_makers')
           .update({
@@ -1114,16 +1113,25 @@ export async function convertProspectToCRM(
 
     // Attempt Supabase write
     try {
-      const supabase = await createClient();
-      const { data: custData, error: custError } = await supabase
+      const admin = createAdminClient();
+      const customerCode = `CUST-${Date.now().toString().slice(-6)}`;
+      const { data: custData, error: custError } = await admin
         .from('customers')
         .insert({
-          name: customerName,
+          customer_code: customerCode,
+          customer_name: customerName,
           company_name: customerName,
+          contact_person: customerName,
           email: email,
           phone: phone,
-          address: address,
-          customer_type: customerType,
+          billing_address: address,
+          city: 'Hyderabad',
+          state: 'Telangana',
+          state_code: '36',
+          credit_limit: 0,
+          enquiry_source: 'Prospect Intelligence',
+          customer_type: customerType === 'Residential' ? 'INDIVIDUAL' : 'COMPANY',
+          status: 'ACTIVE',
           prospect_dossier_id: companyId,
         })
         .select('id')
@@ -1131,7 +1139,7 @@ export async function convertProspectToCRM(
 
       if (!custError && custData) {
         company.crm_customer_id = custData.id;
-        await supabase
+        await admin
           .from('prospect_companies')
           .update({
             status: 'CONVERTED',
@@ -1141,14 +1149,19 @@ export async function convertProspectToCRM(
           .eq('id', companyId);
 
         if (payload.create_enquiry) {
-          const { data: enqData } = await supabase
+          const enqNum = `ENQ-${Date.now().toString().slice(-6)}`;
+          const { data: enqData } = await admin
             .from('enquiries')
             .insert({
+              enquiry_number: enqNum,
               customer_id: custData.id,
               customer_name: customerName,
-              project_type: 'Integrated Technology',
-              notes: payload.enquiry_details || `Initiated via Prospect Intelligence Dossier for ${customerName}. ${dossier?.relevance_analysis.recommended_entry_angle}`,
-              status: 'New',
+              company_name: customerName,
+              phone: phone || '0000000000',
+              product_category: 'Integrated Technology',
+              requirement_summary: payload.enquiry_details || `Initiated via Prospect Intelligence Dossier for ${customerName}. ${dossier?.relevance_analysis.recommended_entry_angle}`,
+              salesperson_name: payload.converted_by,
+              status: 'Enquiry',
             })
             .select('id')
             .single();
@@ -1413,7 +1426,7 @@ export async function convertProspectToEnquiry(
 
       // Update prospect_dossier_id on customer if not set
       try {
-        const supabase = await createClient();
+        const supabase = createAdminClient();
         await supabase
           .from('customers')
           .update({ prospect_dossier_id: prospectDossierId, updated_at: new Date().toISOString() })
@@ -1443,8 +1456,9 @@ export async function convertProspectToEnquiry(
         customer_type: 'COMPANY',
         company_name: customerData.companyName || customerData.customerName,
         contact_person: customerData.customerName,
+        designation: (customerData as any).designation || 'Authorized Representative',
         phone: customerData.phone,
-        email: customerData.email,
+        email: customerData.email || `contact@${(company.company_name || 'company').toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}.com`,
         billing_address: customerData.billingAddress || 'Hyderabad, Telangana',
         city: 'Hyderabad',
         state: 'Telangana',
@@ -1465,7 +1479,7 @@ export async function convertProspectToEnquiry(
 
       // Tag prospect_dossier_id on newly created customer
       try {
-        const supabase = await createClient();
+        const supabase = createAdminClient();
         await supabase
           .from('customers')
           .update({ prospect_dossier_id: prospectDossierId })
@@ -1505,7 +1519,7 @@ export async function convertProspectToEnquiry(
       // COMPENSATION ROLLBACK: If we created a new customer in this transaction, compensate to prevent orphan state
       if (isNewCustomer && createdCustomerId) {
         try {
-          const supabase = await createClient();
+          const supabase = createAdminClient();
           await supabase.from('customers').delete().eq('id', createdCustomerId);
         } catch {
           // Ignore
@@ -1523,7 +1537,7 @@ export async function convertProspectToEnquiry(
     company.updated_at = new Date().toISOString();
 
     try {
-      const supabase = await createClient();
+      const supabase = createAdminClient();
       await supabase
         .from('prospect_companies')
         .update({

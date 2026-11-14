@@ -1,6 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import type { DropdownOptionConfig } from '@/types/rbac';
@@ -84,6 +86,21 @@ function getDropdownStore(): DropdownOptionConfig[] {
 }
 
 export async function getDropdownOptions(category?: DropdownOptionConfig['category']): Promise<DropdownOptionConfig[]> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin.from('custom_dropdown_options').select('*').order('sort_order', { ascending: true });
+      if (category) {
+        query = query.eq('category', category);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        return data as DropdownOptionConfig[];
+      }
+    } catch (err) {
+      console.warn('Supabase getDropdownOptions fallback:', err);
+    }
+  }
   const store = getDropdownStore();
   if (category) {
     return store.filter((o) => o.category === category);
@@ -92,9 +109,9 @@ export async function getDropdownOptions(category?: DropdownOptionConfig['catego
 }
 
 export async function getActiveDropdownOptions(category: DropdownOptionConfig['category']): Promise<DropdownOptionConfig[]> {
-  const store = getDropdownStore();
-  return store
-    .filter((o) => o.category === category && o.is_active)
+  const options = await getDropdownOptions(category);
+  return options
+    .filter((o) => o.is_active)
     .sort((a, b) => a.sort_order - b.sort_order);
 }
 
@@ -139,6 +156,23 @@ export async function addDropdownOption(payload: {
 
     store.push(newOption);
 
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        await admin.from('custom_dropdown_options').insert({
+          id: newOption.id,
+          category: newOption.category,
+          label: newOption.label,
+          value: newOption.value,
+          is_active: true,
+          is_system: false,
+          sort_order: newOption.sort_order,
+        });
+      } catch (err) {
+        console.warn('Supabase addDropdownOption fallback:', err);
+      }
+    }
+
     await logAuditEvent({
       userName: actor.name,
       action: 'DROPDOWN_OPTION_ADDED',
@@ -159,13 +193,27 @@ export async function toggleDropdownOptionActive(
 ): Promise<{ success: boolean; data?: DropdownOptionConfig; error?: string }> {
   try {
     const actor = await requireRole(['Managing Director', 'Admin / BDM']);
-    const store = getDropdownStore();
-    const opt = store.find((o) => o.id === optionId);
+    const options = await getDropdownOptions();
+    const opt = options.find((o) => o.id === optionId);
     if (!opt) {
       return { success: false, error: 'Dropdown option not found.' };
     }
 
     opt.is_active = isActive;
+    const cached = getDropdownStore().find((o) => o.id === optionId);
+    if (cached) cached.is_active = isActive;
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        await admin
+          .from('custom_dropdown_options')
+          .update({ is_active: isActive, updated_at: new Date().toISOString() })
+          .eq('id', optionId);
+      } catch (err) {
+        console.warn('Supabase toggleDropdownOptionActive fallback:', err);
+      }
+    }
 
     await logAuditEvent({
       userName: actor.name,

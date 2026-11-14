@@ -1,6 +1,7 @@
 'use server';
 
 import { DEMO_FEATURES } from '@/lib/registry/demo-features';
+import { requireRole } from '@/lib/auth/session';
 import type { DemoFeatureRegistryItem } from '@/types/hr';
 
 declare global {
@@ -38,6 +39,7 @@ export async function getDemoFeatures(filters?: {
 export async function registerDemoFeature(
   feature: Omit<DemoFeatureRegistryItem, 'last_updated'>
 ): Promise<DemoFeatureRegistryItem> {
+  await requireRole(['Managing Director', 'Admin / BDM']);
   const store = getFeatureStore();
   const existingIdx = store.findIndex((f) => f.id === feature.id);
 

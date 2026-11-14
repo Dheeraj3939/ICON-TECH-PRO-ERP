@@ -6,6 +6,13 @@ import type {
   EmailEntityType,
 } from '@/types/email-provider';
 import { defaultGmailProvider } from './providers/gmail-provider';
+import { defaultZohoProvider } from './providers/zoho-provider';
+import {
+  defaultFailoverEmailProvider,
+  FailoverEmailProvider,
+  type FailoverSendResult,
+  type ProviderHealthReport,
+} from './providers/failover-provider';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -23,7 +30,7 @@ function getEmailLogsStore(): EmailLogRecord[] {
 }
 
 export class EmailService {
-  private static provider: IEmailProvider = defaultGmailProvider;
+  private static provider: IEmailProvider = defaultFailoverEmailProvider;
 
   /**
    * Set or override the active email provider (e.g. for testing or alternate gateways)
@@ -37,6 +44,21 @@ export class EmailService {
    */
   public static getProvider(): IEmailProvider {
     return EmailService.provider;
+  }
+
+  /**
+   * Get health of primary Zoho and fallback Gmail providers.
+   */
+  public static async getProviderHealth(): Promise<ProviderHealthReport> {
+    if (EmailService.provider instanceof FailoverEmailProvider) {
+      return EmailService.provider.getHealth();
+    }
+    const isConf = await EmailService.provider.isConfigured().catch(() => false);
+    return {
+      primary: { name: EmailService.provider.name, configured: isConf, operational: isConf },
+      fallback: { name: 'none', configured: false, operational: false },
+      activeMode: isConf ? 'PRIMARY_ZOHO' : 'ALL_UNAVAILABLE',
+    };
   }
 
   /**
@@ -64,21 +86,33 @@ export class EmailService {
 
     let result: EmailSendResult;
 
-    try {
-      result = await provider.sendEmail(message);
-    } catch (err: any) {
+    // HARD DEMONSTRATION & TEST TRAP: Block all external outbound email transmission unless explicitly enabled
+    const liveDispatchEnabled = process.env.ENABLE_LIVE_EMAIL_DISPATCH === 'true';
+    if (!liveDispatchEnabled) {
       result = {
-        success: false,
-        error: err.message || 'Unknown email dispatch error',
-        provider: provider.name,
+        success: true,
+        messageId: `DEMO-TRAPPED-${Date.now()}`,
+        threadId: `DEMO-THREAD-${Date.now()}`,
+        provider: 'DEMO_TRAP_MODE',
+        sentAt: new Date().toISOString(),
       };
+    } else {
+      try {
+        result = await provider.sendEmail(message);
+      } catch (err: any) {
+        result = {
+          success: false,
+          error: err.message || 'Unknown email dispatch error',
+          provider: provider.name,
+        };
+      }
     }
 
     // Build complete activity log record
     const logRecord: EmailLogRecord = {
       id: logId,
-      provider: provider.name,
-      from_email: 'icontechpro@gmail.com',
+      provider: result.provider || provider.name,
+      from_email: (result as any).fallbackUsed ? 'icontechpro@gmail.com' : 'sales@icontechpro.in',
       to_email: toStr,
       cc_email: ccStr,
       bcc_email: bccStr,
@@ -158,7 +192,7 @@ export class EmailService {
         if (filter?.invoiceId) query = query.eq('invoice_id', filter.invoiceId);
 
         const { data, error } = await query;
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           return data as EmailLogRecord[];
         }
       } catch (err) {

@@ -80,7 +80,7 @@ export async function getAttendance(filters?: {
       }
 
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         list = data.map((d: any) => ({
           id: d.id,
           employee_id: d.employee_id,

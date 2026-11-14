@@ -1,13 +1,13 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { getNextSupplierInvoiceRef } from '@/lib/utils/sequence';
-import { getPurchaseOrdersStore } from '@/lib/actions/procurement';
+import { getPurchaseOrders } from '@/lib/actions/procurement';
 import { queueTallySync } from '@/lib/actions/tally';
 import type {
   SupplierInvoice,
@@ -120,6 +120,49 @@ export async function getSupplierInvoices(filters?: {
   match_status?: MatchStatus;
   payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
 }): Promise<{ invoices: SupplierInvoice[]; total: number }> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin.from('supplier_invoices').select('*').order('created_at', { ascending: false });
+      if (filters?.supplier_id) query = query.eq('supplier_id', filters.supplier_id);
+      if (filters?.match_status) query = query.eq('match_status', filters.match_status);
+      const { data, error } = await query;
+      if (!error && data) {
+        const mapped: SupplierInvoice[] = data.map((row: any) => ({
+          id: row.id,
+          invoice_number: row.distributor_invoice_number || row.invoice_ref,
+          invoice_date: row.distributor_invoice_date,
+          supplier_id: row.supplier_id || '',
+          supplier_name: row.supplier_name,
+          po_id: row.po_id,
+          po_number: row.po_number,
+          grn_number: row.grn_number,
+          items: [],
+          subtotal: Number(row.subtotal) || 0,
+          cgst: 0,
+          sgst: 0,
+          igst: Number(row.tax_amount) || 0,
+          freight_other_charges: 0,
+          total_amount: Number(row.grand_total) || 0,
+          due_date: row.distributor_invoice_date,
+          payment_terms: 'Net 30',
+          tally_sync_status: row.staged_for_tally ? 'PENDING' : 'FAILED',
+          payment_status: 'UNPAID',
+          outstanding_amount: Number(row.grand_total) || 0,
+          match_status: row.match_status as MatchStatus,
+          match_notes: row.discrepancy_notes || undefined,
+          created_at: row.created_at,
+        }));
+        const filtered = filters?.payment_status
+          ? mapped.filter((i) => i.payment_status === filters.payment_status)
+          : mapped;
+        return { invoices: filtered, total: filtered.length };
+      }
+    } catch (err) {
+      console.warn('Supabase getSupplierInvoices fallback:', err);
+    }
+  }
+
   const store = getInternalInvoicesStore();
 
   let filtered = [...store];
@@ -147,7 +190,7 @@ export async function performThreeWayMatch(
     items: Array<{ product_name: string; quantity: number; purchase_price: number }>;
   }
 ): Promise<ThreeWayMatchResult> {
-  const poStore = await getPurchaseOrdersStore();
+  const poStore = await getPurchaseOrders();
   const po = poStore.find((p: PurchaseOrder) => p.po_number.toLowerCase() === invoiceData.po_number.trim().toLowerCase());
 
   if (!po) {
@@ -311,6 +354,38 @@ export async function recordSupplierInvoice(payload: {
     };
 
     store.unshift(newInvoice);
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const invRef = await getNextSupplierInvoiceRef();
+        const taxAmount = Number(((payload.cgst || 0) + (payload.sgst || 0) + (payload.igst || 0)).toFixed(2));
+        const { data: dbSinv } = await admin
+          .from('supplier_invoices')
+          .insert({
+            invoice_ref: invRef,
+            supplier_id: sanitizeUuid(payload.supplier_id) || payload.supplier_id || null,
+            supplier_name: payload.supplier_name,
+            distributor_invoice_number: payload.invoice_number,
+            distributor_invoice_date: payload.invoice_date,
+            po_number: payload.po_number,
+            subtotal: payload.subtotal,
+            tax_amount: taxAmount,
+            grand_total: payload.total_amount,
+            match_status: match.match_status,
+            discrepancy_notes: newInvoice.match_notes,
+            staged_for_tally: match.is_perfect_match,
+            created_by_name: authUser.name,
+          })
+          .select('id')
+          .single();
+        if (dbSinv?.id) {
+          newInvoice.id = dbSinv.id;
+        }
+      } catch (dbErr) {
+        console.warn('Supabase supplier_invoices insert fallback:', dbErr);
+      }
+    }
 
     // If perfectly matched, queue to Tally sync queue automatically
     if (match.is_perfect_match) {

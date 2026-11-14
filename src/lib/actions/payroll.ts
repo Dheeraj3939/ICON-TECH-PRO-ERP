@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { requireRole } from '@/lib/auth/session';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { findByIdOrCode, isUuid, sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { logHRAudit } from '@/lib/actions/employees';
 import {
   INITIAL_SALARIES,
@@ -66,6 +67,32 @@ function getNextPayslipNumber(): string {
 export async function getSalaries(employeeId?: string): Promise<EmployeeSalaryHistory[]> {
   await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
 
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin
+        .from('employee_salary_history')
+        .select('*')
+        .order('effective_from', { ascending: false });
+      if (employeeId) {
+        if (isUuid(employeeId)) {
+          query = query.eq('employee_id', employeeId);
+        } else {
+          const emp = await findByIdOrCode<{ id: string }>(admin, 'employees', employeeId, 'employee_id', 'id');
+          if (emp?.id) query = query.eq('employee_id', emp.id);
+        }
+      } else {
+        query = query.eq('is_current', true);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        return data as EmployeeSalaryHistory[];
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
   const store = getSalariesStore();
   if (employeeId) {
     return store.filter((s) => s.employee_id === employeeId);
@@ -80,12 +107,7 @@ export async function getSalaries(employeeId?: string): Promise<EmployeeSalaryHi
 export async function getEmployeeSalaryHistory(
   employeeId: string
 ): Promise<EmployeeSalaryHistory[]> {
-  await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
-
-  const store = getSalariesStore();
-  return store
-    .filter((s) => s.employee_id === employeeId)
-    .sort((a, b) => new Date(b.effective_from).getTime() - new Date(a.effective_from).getTime());
+  return getSalaries(employeeId);
 }
 
 /**
@@ -163,6 +185,53 @@ export async function updateEmployeeSalary(data: {
 
   store.unshift(newRecord);
 
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let resolvedEmpId = sanitizeUuid(data.employee_id);
+      if (!resolvedEmpId) {
+        const emp = await findByIdOrCode<{ id: string }>(admin, 'employees', data.employee_id, 'employee_id', 'id');
+        resolvedEmpId = emp?.id || null;
+      }
+      if (resolvedEmpId) {
+        await admin
+          .from('employee_salary_history')
+          .update({ is_current: false })
+          .eq('employee_id', resolvedEmpId)
+          .eq('is_current', true);
+        const { data: insertedSal } = await admin
+          .from('employee_salary_history')
+          .insert({
+            employee_id: resolvedEmpId,
+            effective_from: newRecord.effective_from,
+            basic_salary: newRecord.basic_salary,
+            hra: newRecord.hra,
+            conveyance: newRecord.conveyance,
+            special_allowance: newRecord.special_allowance,
+            other_allowances: newRecord.other_allowances,
+            gross_salary: newRecord.gross_salary,
+            pf: newRecord.pf,
+            esi: newRecord.esi,
+            professional_tax: newRecord.professional_tax,
+            tds: newRecord.tds,
+            other_deductions: newRecord.other_deductions,
+            total_deductions: newRecord.total_deductions,
+            net_salary: newRecord.net_salary,
+            ctc: newRecord.ctc,
+            revision_reason: newRecord.revision_reason,
+            approved_by: newRecord.approved_by,
+            approval_date: newRecord.approval_date,
+            is_current: true,
+          })
+          .select('id')
+          .single();
+        if (insertedSal?.id) newRecord.id = insertedSal.id;
+      }
+    } catch {
+      // Non-fatal fallback
+    }
+  }
+
   await logHRAudit({
     performed_by: authUser.name,
     performed_by_role: authUser.role,
@@ -184,6 +253,18 @@ export async function updateEmployeeSalary(data: {
  */
 export async function getPayrollRuns(): Promise<PayrollRun[]> {
   await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const { data, error } = await admin
+        .from('payroll_runs')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data) return data as PayrollRun[];
+    } catch {
+      // Fallback
+    }
+  }
   return getPayrollRunsStore();
 }
 
@@ -199,13 +280,14 @@ export async function createPayrollRun(payrollMonth: string): Promise<{
 }> {
   const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
 
-  const runs = getPayrollRunsStore();
+  const runs = await getPayrollRuns();
   const existing = runs.find((r) => r.payroll_month === payrollMonth);
   if (existing) {
     return { success: false, error: `Payroll for ${payrollMonth} already exists.` };
   }
 
-  const salaries = getSalariesStore().filter((s) => s.is_current);
+  const allSalaries = await getSalaries();
+  const salaries = allSalaries.filter((s) => s.is_current);
   const totalGross = salaries.reduce((acc, s) => acc + s.gross_salary, 0);
   const totalDed = salaries.reduce((acc, s) => acc + s.total_deductions, 0);
   const totalNet = totalGross - totalDed;
@@ -225,7 +307,31 @@ export async function createPayrollRun(payrollMonth: string): Promise<{
     created_at: new Date().toISOString(),
   };
 
-  runs.unshift(newRun);
+  getPayrollRunsStore().unshift(newRun);
+
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const { data: insertedRun } = await admin
+        .from('payroll_runs')
+        .insert({
+          payroll_code: newRun.payroll_code,
+          payroll_month: newRun.payroll_month,
+          total_employees: newRun.total_employees,
+          total_gross: newRun.total_gross,
+          total_deductions: newRun.total_deductions,
+          total_net_payout: newRun.total_net_payout,
+          status: newRun.status,
+          processed_by: newRun.processed_by,
+          remarks: newRun.remarks,
+        })
+        .select('id')
+        .single();
+      if (insertedRun?.id) newRun.id = insertedRun.id;
+    } catch {
+      // Non-fatal fallback
+    }
+  }
 
   await logHRAudit({
     performed_by: authUser.name,
@@ -253,8 +359,8 @@ export async function updatePayrollStatus(
 ): Promise<{ success: boolean; error?: string }> {
   const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
 
-  const runs = getPayrollRunsStore();
-  const run = runs.find((r) => r.id === runId);
+  const runs = await getPayrollRuns();
+  const run = runs.find((r) => r.id === runId || r.payroll_code === runId);
   if (!run) {
     return { success: false, error: 'Payroll run not found.' };
   }
@@ -268,6 +374,20 @@ export async function updatePayrollStatus(
   if (status === 'Paid') {
     run.payment_date = new Date().toISOString().split('T')[0];
     run.payment_reference = paymentRef || `HDFC-NEFT-${Date.now().toString().slice(-8)}`;
+  }
+
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const upQ = admin.from('payroll_runs').update({
+        status: run.status,
+        payment_date: run.payment_date || null,
+        payment_reference: run.payment_reference || null,
+      });
+      await (isUuid(run.id) ? upQ.eq('id', run.id) : upQ.eq('payroll_code', run.payroll_code));
+    } catch {
+      // Non-fatal fallback
+    }
   }
 
   await logHRAudit({
@@ -294,6 +414,32 @@ export async function getPayslips(filters?: {
   employeeId?: string;
 }): Promise<Payslip[]> {
   await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
+
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin
+        .from('payslips')
+        .select('*, employees(full_name, designation)')
+        .order('generated_at', { ascending: false });
+      if (filters?.month && filters.month !== 'ALL') {
+        query = query.ilike('payroll_month', `%${filters.month}%`);
+      }
+      if (filters?.employeeId && filters.employeeId !== 'ALL' && isUuid(filters.employeeId)) {
+        query = query.eq('employee_id', filters.employeeId);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        return data.map((p: any) => ({
+          ...p,
+          employee_name: p.employees?.full_name || p.employee_name || 'Employee',
+          designation: p.employees?.designation || p.designation || '',
+        })) as Payslip[];
+      }
+    } catch {
+      // Fallback
+    }
+  }
 
   let slips = getPayslipsStore();
   if (filters?.month && filters.month !== 'ALL') {

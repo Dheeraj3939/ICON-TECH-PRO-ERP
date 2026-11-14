@@ -19,6 +19,14 @@ import {
 import { getAuditLogsStore } from '@/lib/audit/logger';
 
 export async function GET() {
+  // Fail-closed guard: Strictly disable test execution in production environments
+  if (
+    process.env.NODE_ENV === 'production' ||
+    process.env.NEXT_PUBLIC_ERP_ENV?.trim().toUpperCase() === 'PRODUCTION'
+  ) {
+    return NextResponse.json({ error: 'Endpoint not found' }, { status: 404 });
+  }
+
   const testResults: Array<{
     name: string;
     category: string;

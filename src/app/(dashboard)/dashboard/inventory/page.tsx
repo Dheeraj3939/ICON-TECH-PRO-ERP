@@ -25,30 +25,60 @@ import {
   traceSerialLifecycle,
   scanAndMoveSerial,
 } from '@/lib/actions/inventory';
+import { getSerialRecords } from '@/lib/actions/serials';
+import { getOrders } from '@/lib/actions/orders';
 import { exportToCSV } from '@/lib/utils/export';
+import { getCurrentSessionUser } from '@/lib/actions/users';
+import { canExportCSV } from '@/lib/permissions/registry';
+import type { AuthenticatedUser } from '@/lib/auth/session';
 import type {
   Product,
   StockMovementRecord,
   SerialLifecycleTrace,
   SerialLedgerEntry,
+  SerialRecord,
 } from '@/types/erp';
 
 export default function InventoryPage() {
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  const [serialRecords, setSerialRecords] = useState<SerialRecord[]>([]);
+  const [reservedBySku, setReservedBySku] = useState<Record<string, number>>({});
   const [stockMovements, setStockMovements] = useState<StockMovementRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'balances' | 'movements' | 'tracer'>('balances');
 
   // Serial Lifecycle Tracer states
-  const [serialQuery, setSerialQuery] = useState('EP-4K-980-SN4401');
+  const [serialQuery, setSerialQuery] = useState('');
   const [activeTrace, setActiveTrace] = useState<SerialLifecycleTrace | null>(null);
   const [isTracing, setIsTracing] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
+    getCurrentSessionUser().then(setCurrentUser);
     getProducts().then((res) => setProducts(res.products));
     getStockMovements().then((m) => setStockMovements(m));
-    traceSerialLifecycle('EP-4K-980-SN4401').then((res) => {
-      if (res.success && res.data) setActiveTrace(res.data);
+    getSerialRecords().then((res) => {
+      const recs = res.records || [];
+      setSerialRecords(recs);
+      if (recs.length > 0) {
+        setSerialQuery(recs[0].serial_number);
+        traceSerialLifecycle(recs[0].serial_number).then((traceRes) => {
+          if (traceRes.success && traceRes.data) setActiveTrace(traceRes.data);
+        });
+      }
+    });
+    getOrders().then((res) => {
+      const counts: Record<string, number> = {};
+      for (const ord of res.orders || []) {
+        if (ord.status === 'Cancelled' || ord.status === 'Completed') continue;
+        for (const it of ord.items || []) {
+          const key = (it.sku || it.product_name || '').toLowerCase();
+          if (key) {
+            counts[key] = (counts[key] || 0) + (it.reserved_quantity || 0);
+          }
+        }
+      }
+      setReservedBySku(counts);
     });
   }, []);
 
@@ -112,45 +142,54 @@ export default function InventoryPage() {
     }
   };
 
-  const sampleSerials = [
-    { serial: 'EP-4K-980-SN4401', product: 'Epson Home Cinema 4K Laser Projector', warehouse: 'WH-HYD-MAIN', status: 'INSTALLED (T-Hub)' },
-    { serial: 'EPS-2250-89102', product: 'Epson Business Projector 4500L', warehouse: 'WH-HYD-MAIN', status: 'AVAILABLE' },
-    { serial: 'EPS-2250-89103', product: 'Epson Business Projector 4500L', warehouse: 'WH-HYD-MAIN', status: 'AVAILABLE' },
-    { serial: 'EPS-2250-89104', product: 'Epson Business Projector 4500L', warehouse: 'WH-HYD-MAIN', status: 'RESERVED (Quote QT260003)' },
-    { serial: 'ST2400-DEL-001', product: '2.4TB SAS HDD 12Gbps', warehouse: 'WH-HYD-MAIN', status: 'RESERVED (Order ORD260002)' },
-    { serial: 'ST2400-DEL-002', product: '2.4TB SAS HDD 12Gbps', warehouse: 'WH-HYD-MAIN', status: 'RESERVED (Order ORD260002)' },
-    { serial: 'CSCO-CBS350-01', product: '24-Port Gigabit Managed PoE+ Switch', warehouse: 'WH-HYD-MAIN', status: 'DISPATCHED (Order ORD260001)' },
-    { serial: 'HIK-4K-CAM-081', product: '8MP 4K ColorVu IP Bullet Camera', warehouse: 'WH-HYD-MAIN', status: 'INSTALLED (Sri Sai Hospitals)' },
-    { serial: 'DEN-AVR-X2800', product: 'Denon 7.2 AV Receiver Dolby Atmos', warehouse: 'WH-HYD-MAIN', status: 'AVAILABLE' },
-    { serial: 'VIEW-IFP-75-01', product: 'ViewSonic 75" 4K Flat Panel', warehouse: 'WH-HYD-RENTAL', status: 'AVAILABLE (Demo Hub)' },
-  ];
+  const liveSerials = serialRecords.map((r) => ({
+    serial: r.serial_number,
+    product: r.product_name,
+    warehouse: 'WH-HYD-MAIN',
+    status:
+      r.status === 'INSTALLED' && r.customer_name
+        ? `INSTALLED (${r.customer_name})`
+        : r.order_number
+        ? `${r.status} (${r.order_number})`
+        : r.status,
+  }));
 
   const handleExportStockCSV = () => {
-    exportToCSV('ICON_Inventory_Stock', products, [
-      { key: 'sku', label: 'SKU' },
-      { key: 'name', label: 'Product Name' },
-      { key: 'category_name', label: 'Category' },
-      { key: 'brand_name', label: 'Brand' },
-      { key: 'current_stock', label: 'Stock On Hand' },
-      { key: 'reorder_level', label: 'Reorder Level' },
-      { key: 'unit', label: 'Unit' },
-      { key: 'selling_price', label: 'Valuation Price (₹)' },
-    ]);
+    exportToCSV(
+      'ICON_Inventory_Stock',
+      products,
+      [
+        { key: 'sku', label: 'SKU' },
+        { key: 'name', label: 'Product Name' },
+        { key: 'category_name', label: 'Category' },
+        { key: 'brand_name', label: 'Brand' },
+        { key: 'current_stock', label: 'Stock On Hand' },
+        { key: 'reorder_level', label: 'Reorder Level' },
+        { key: 'unit', label: 'Unit' },
+        { key: 'selling_price', label: 'Valuation Price (₹)' },
+      ],
+      currentUser?.role
+    );
   };
 
   const handleExportMovementsCSV = () => {
-    exportToCSV('ICON_Stock_Movements', stockMovements, [
-      { key: 'created_at', label: 'Timestamp' },
-      { key: 'movement_type', label: 'Type' },
-      { key: 'product_name', label: 'Product' },
-      { key: 'quantity', label: 'Quantity' },
-      { key: 'previous_stock', label: 'Previous Stock' },
-      { key: 'new_stock', label: 'New Stock' },
-      { key: 'reference_module', label: 'Module' },
-      { key: 'reference_number', label: 'Reference' },
-      { key: 'warehouse_code', label: 'Warehouse' },
-      { key: 'created_by_name', label: 'Actor' },
-    ]);
+    exportToCSV(
+      'ICON_Stock_Movements',
+      stockMovements,
+      [
+        { key: 'created_at', label: 'Timestamp' },
+        { key: 'movement_type', label: 'Type' },
+        { key: 'product_name', label: 'Product' },
+        { key: 'quantity', label: 'Quantity' },
+        { key: 'previous_stock', label: 'Previous Stock' },
+        { key: 'new_stock', label: 'New Stock' },
+        { key: 'reference_module', label: 'Module' },
+        { key: 'reference_number', label: 'Reference' },
+        { key: 'warehouse_code', label: 'Warehouse' },
+        { key: 'created_by_name', label: 'Actor' },
+      ],
+      currentUser?.role
+    );
   };
 
   return (
@@ -172,24 +211,26 @@ export default function InventoryPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {activeTab === 'movements' ? (
-            <button
-              type="button"
-              onClick={handleExportMovementsCSV}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
-            >
-              <Download className="w-4 h-4 text-slate-500" />
-              <span>Export Ledger CSV</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleExportStockCSV}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
-            >
-              <Download className="w-4 h-4 text-slate-500" />
-              <span>Export Stock CSV</span>
-            </button>
+          {canExportCSV(currentUser?.role) && (
+            activeTab === 'movements' ? (
+              <button
+                type="button"
+                onClick={handleExportMovementsCSV}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
+              >
+                <Download className="w-4 h-4 text-slate-500" />
+                <span>Export Ledger CSV</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleExportStockCSV}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
+              >
+                <Download className="w-4 h-4 text-slate-500" />
+                <span>Export Stock CSV</span>
+              </button>
+            )
           )}
         </div>
       </div>
@@ -307,7 +348,10 @@ export default function InventoryPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {products.map((p) => {
-                    const reserved = p.sku === 'PROJ-BUS-01' ? 1 : p.sku === 'SRV-HDD-2.4T' ? 2 : p.sku === 'SRV-RAM-32G' ? 2 : 0;
+                    const reserved =
+                      reservedBySku[(p.sku || '').toLowerCase()] ??
+                      reservedBySku[(p.name || '').toLowerCase()] ??
+                      0;
                     const available = Math.max(0, p.current_stock - reserved);
                     const isLow = p.current_stock <= p.reorder_level;
 
@@ -347,7 +391,10 @@ export default function InventoryPage() {
             {/* Mobile Responsive Cards View */}
             <div className="block md:hidden divide-y divide-slate-100 p-3 space-y-3">
               {products.map((p) => {
-                const reserved = p.sku === 'PROJ-BUS-01' ? 1 : p.sku === 'SRV-HDD-2.4T' ? 2 : p.sku === 'SRV-RAM-32G' ? 2 : 0;
+                const reserved =
+                  reservedBySku[(p.sku || '').toLowerCase()] ??
+                  reservedBySku[(p.name || '').toLowerCase()] ??
+                  0;
                 const available = Math.max(0, p.current_stock - reserved);
                 const isLow = p.current_stock <= p.reorder_level;
 
@@ -409,7 +456,14 @@ export default function InventoryPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {sampleSerials.map((s, idx) => (
+                  {liveSerials.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-8 px-3 text-center text-slate-400">
+                        No serial numbers registered yet. Register serials during GRN inward or installation handover.
+                      </td>
+                    </tr>
+                  ) : (
+                    liveSerials.map((s, idx) => (
                     <tr
                       key={idx}
                       onClick={() => {
@@ -438,14 +492,18 @@ export default function InventoryPage() {
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
 
             {/* Mobile Responsive Cards View */}
             <div className="block md:hidden divide-y divide-slate-100 p-3 space-y-2">
-              {sampleSerials.map((s, idx) => (
+              {liveSerials.length === 0 ? (
+                <p className="py-6 text-center text-xs text-slate-400">No serial numbers registered yet.</p>
+              ) : (
+                liveSerials.map((s, idx) => (
                 <div
                   key={idx}
                   onClick={() => {
@@ -472,7 +530,8 @@ export default function InventoryPage() {
                   <h4 className="font-bold text-slate-900 text-xs">{s.product}</h4>
                   <p className="text-[11px] text-slate-500">Warehouse: {s.warehouse}</p>
                 </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>

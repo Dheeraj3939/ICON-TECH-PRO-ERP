@@ -29,8 +29,17 @@ import {
   Landmark,
   Home,
   Compass,
+  FolderArchive,
+  Upload,
+  Download,
+  ExternalLink,
+  Search,
+  Filter,
+  FileCheck,
 } from 'lucide-react';
+import { UploadSignedDocumentModal } from '@/components/modals/UploadSignedDocumentModal';
 import type { Customer360Dossier } from '@/lib/actions/customer360';
+import type { BusinessDocumentType, CustomerArchiveDocument } from '@/types/documents';
 
 interface Customer360ViewProps {
   dossier: Customer360Dossier;
@@ -44,6 +53,7 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
     quotations,
     orders,
     invoices,
+    payments = [],
     installations,
     serials,
     tickets,
@@ -57,6 +67,8 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
     timeline,
     financialSummary,
     healthMetrics,
+    projectFiles = [],
+    archiveDocuments: initialArchiveDocs = [],
   } = dossier;
 
   const [activeTab, setActiveTab] = useState<
@@ -64,12 +76,26 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
     | 'COMMERCIALS'
     | 'PROCUREMENT'
     | 'INVOICES'
+    | 'DOCUMENTS'
     | 'ASSETS'
     | 'PROJECTS'
     | 'TASKS_APPROVALS'
     | 'TIMELINE'
     | 'COMMUNICATIONS'
   >('OVERVIEW');
+
+  const [docSearch, setDocSearch] = useState('');
+  const [docTypeFilter, setDocTypeFilter] = useState<string>('ALL');
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [selectedDocForUpload, setSelectedDocForUpload] = useState<{
+    document_type: BusinessDocumentType;
+    document_number: string;
+    customer_id: string;
+    customer_name: string;
+    company_name?: string;
+    related_transaction_number?: string;
+    original_generated_pdf_url?: string;
+  } | undefined>(undefined);
 
   const isGovernment = customer.customer_type === 'GOVERNMENT';
   const isCompany = customer.customer_type === 'COMPANY';
@@ -159,6 +185,12 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
                   <HealthIcon className="w-3.5 h-3.5" />
                   {healthBadge.label}
                 </span>
+
+                {customer.enquiry_source && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold text-xs">
+                    Source: {customer.enquiry_source}
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-4 text-xs text-slate-500 mt-2 flex-wrap">
@@ -229,7 +261,7 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
               Site Visit
             </Link>
             <Link
-              href={`/dashboard/quotations?customer_id=${customer.id}&customer_name=${encodeURIComponent(customer.customer_name)}`}
+              href={`/dashboard/quotations/new?customer_id=${customer.id}&customer_name=${encodeURIComponent(customer.customer_name)}`}
               className="px-3.5 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-brand-500/20"
             >
               <PlusCircle className="w-3.5 h-3.5" />
@@ -364,8 +396,9 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
         {[
           { id: 'OVERVIEW', label: 'Customer Details', count: undefined },
           { id: 'COMMERCIALS', label: 'Business (Quotes & Orders)', count: quotations.length + orders.length },
-          { id: 'INVOICES', label: 'Invoices & Payments', count: invoices.length },
-          { id: 'PROJECTS', label: 'Projects & Site Visits', count: installations.length + siteVisits.length },
+          { id: 'INVOICES', label: 'Invoices & Payments', count: invoices.length + payments.length },
+          { id: 'DOCUMENTS', label: 'Document Archive', count: initialArchiveDocs.length },
+          { id: 'PROJECTS', label: 'Projects & Site Visits (Open Files)', count: projectFiles.length + installations.length + siteVisits.length },
           { id: 'ASSETS', label: 'Service & AMC', count: amcContracts.length + tickets.length + serials.length },
           { id: 'COMMUNICATIONS', label: 'Activity & Outbox', count: communications.length + timeline.length },
           { id: 'PROCUREMENT', label: 'Purchases & Sourcing', count: purchaseOrders.length },
@@ -727,6 +760,8 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
         </div>
       )}
 
+
+
       {/* Tab 2: COMMERCIALS (Quotes & Orders) */}
       {activeTab === 'COMMERCIALS' && (
         <div className="space-y-6">
@@ -835,6 +870,8 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
         </div>
       )}
 
+
+
       {/* Tab 3: PROCUREMENT & DROP-SHIPS */}
       {activeTab === 'PROCUREMENT' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
@@ -925,48 +962,143 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
 
       {/* Tab 4: INVOICES & LEDGER */}
       {activeTab === 'INVOICES' && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-          <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <CreditCard className="w-4 h-4 text-brand-600" />
-            Tax Invoices & Receivables Ledger
-          </h3>
-          {invoices.length > 0 ? (
-            <div className="divide-y divide-slate-100">
-              {invoices.map((inv) => (
-                <div key={inv.id} className="py-3 flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-xs text-slate-900">
-                        {inv.invoice_number}
+        <div className="space-y-6">
+          {/* Financial Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                Total Invoiced
+              </span>
+              <span className="text-xl font-black text-slate-900 block">
+                ₹{financialSummary.totalInvoiced.toLocaleString('en-IN')}
+              </span>
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                {invoices.length} tax invoice(s)
+              </span>
+            </div>
+
+            <div className="bg-emerald-500/5 rounded-2xl border border-emerald-200/80 p-5 shadow-sm">
+              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider block mb-1">
+                Total Collected / Paid
+              </span>
+              <span className="text-xl font-black text-emerald-700 block">
+                ₹{financialSummary.totalCollected.toLocaleString('en-IN')}
+              </span>
+              <span className="text-[11px] text-emerald-600 mt-1 block">
+                {payments.length} receipt(s) from Tally & ERP
+              </span>
+            </div>
+
+            <div className={`rounded-2xl border p-5 shadow-sm ${financialSummary.balanceDue > 0 ? 'bg-rose-500/5 border-rose-200/80' : 'bg-slate-50 border-slate-200'}`}>
+              <span className={`text-xs font-bold uppercase tracking-wider block mb-1 ${financialSummary.balanceDue > 0 ? 'text-rose-800' : 'text-slate-500'}`}>
+                Balance Outstanding
+              </span>
+              <span className={`text-xl font-black block ${financialSummary.balanceDue > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                ₹{financialSummary.balanceDue.toLocaleString('en-IN')}
+              </span>
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                {financialSummary.overdueInvoicesCount > 0 ? `${financialSummary.overdueInvoicesCount} overdue` : 'Clear status'}
+              </span>
+            </div>
+          </div>
+
+          {/* Tax Invoices Section */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-brand-600" />
+                Tax Invoices ({invoices.length})
+              </span>
+              <span className="text-xs text-slate-400 font-normal">
+                Synced from ERP Billing & TallyPrime
+              </span>
+            </h3>
+            {invoices.length > 0 ? (
+              <div className="divide-y divide-slate-100">
+                {invoices.map((inv) => (
+                  <div key={inv.id} className="py-3 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-xs text-slate-900">
+                          {inv.invoice_number}
+                        </span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                            inv.status === 'Paid'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-rose-50 text-rose-700 border border-rose-200'
+                          }`}
+                        >
+                          {inv.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Date: {inv.invoice_date} • Due: {inv.due_date || 'Immediate'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-black text-slate-900 block">
+                        ₹{inv.grand_total.toLocaleString('en-IN')}
                       </span>
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                          inv.status === 'Paid'
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : 'bg-rose-50 text-rose-700 border border-rose-200'
-                        }`}
-                      >
-                        {inv.status}
+                      <span className="text-xs font-semibold text-rose-600">
+                        Bal: ₹{inv.balance_amount.toLocaleString('en-IN')}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Date: {inv.invoice_date} • Due: {inv.due_date || 'Immediate'}
-                    </p>
                   </div>
-                  <div className="text-right">
-                    <span className="text-sm font-black text-slate-900 block">
-                      ₹{inv.grand_total.toLocaleString('en-IN')}
-                    </span>
-                    <span className="text-xs font-semibold text-rose-600">
-                      Bal: ₹{inv.balance_amount.toLocaleString('en-IN')}
-                    </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 py-3 text-center">
+                No unpaid tax invoices pending. Historical vouchers will stream from Tally on next sync.
+              </p>
+            )}
+          </div>
+
+          {/* Bank Receipts & Collections Section */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                Bank Receipts & Collections ({payments.length})
+              </span>
+              <span className="text-xs text-emerald-600 font-medium">
+                100% Inbound from TallyPrime 7.2
+              </span>
+            </h3>
+            {payments.length > 0 ? (
+              <div className="divide-y divide-slate-100">
+                {payments.map((p) => (
+                  <div key={p.id} className="py-3 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-xs text-slate-900">
+                          {p.payment_number}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          RECONCILED WITH TALLY
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Date: {p.payment_date} • Mode: {p.mode || 'Bank Transfer'} • {p.reference_number || 'Tally Receipt'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-black text-emerald-700 block">
+                        +₹{Number(p.amount).toLocaleString('en-IN')}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {p.bank_name || 'Bank Account'}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400 py-4 text-center">No invoices generated yet</p>
-          )}
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 py-3 text-center">
+                No receipts recorded for this customer yet.
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -1046,9 +1178,180 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
         </div>
       )}
 
+
+
       {/* Tab 6: PROJECTS & SERVICE */}
       {activeTab === 'PROJECTS' && (
         <div className="space-y-6">
+          {/* Customer Open Files & Project Lifecycle */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-brand-600" />
+                  Open Files & Project Lifecycle ({projectFiles.length})
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Multi-item orders and customer projects tracked across 3 independent status dimensions.
+                </p>
+              </div>
+              <Link
+                href={`/dashboard/projects?customer_id=${customer.id}&action=new`}
+                className="px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>New Project File</span>
+              </Link>
+            </div>
+
+            {projectFiles.length > 0 ? (
+              <div className="divide-y divide-slate-100">
+                {projectFiles.map((file) => (
+                  <div key={file.id} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-xs text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                          {file.file_id || file.project_code || file.id.slice(0, 12)}
+                        </span>
+                        <span className="text-xs font-bold text-slate-900">
+                          {file.project_name || file.title || 'Customer Hardware Order'}
+                        </span>
+                        {file.department_owner && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                            Dept: {file.department_owner}
+                          </span>
+                        )}
+                        {file.file_owner_name && (
+                          <span className="text-[10px] font-semibold text-slate-500">
+                            Owner: {file.file_owner_name}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* 3 Status Dimensions Badges */}
+                      <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                          Sales: {file.sales_status || file.status}
+                        </span>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                          Fulfilment: {file.fulfilment_status || 'Not Started'}
+                        </span>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                          Financial: {file.financial_status || 'No Financial Activity'}
+                        </span>
+                      </div>
+
+                      {/* Customer PO Details if attached */}
+                      {file.customer_po && (
+                        <div className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-200/60 mt-1 flex items-center gap-3 flex-wrap">
+                          <span className="font-bold text-slate-800">
+                            PO #{file.customer_po.po_number}
+                          </span>
+                          <span>Dated: {file.customer_po.po_date}</span>
+                          <span>Value: ₹{(file.customer_po.po_value || 0).toLocaleString('en-IN')}</span>
+                          <span>Terms: {file.customer_po.payment_terms}</span>
+                          <span className="text-brand-700 font-semibold">Trigger: {file.customer_po.payment_trigger}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+                      <Link
+                        href={`/dashboard/projects/${file.id}`}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition flex items-center gap-1"
+                      >
+                        <span>Open File</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-6 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+                <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-xs font-semibold text-slate-600">No project files currently open for this customer</p>
+                <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
+                  Open Files track IT hardware deliveries, multi-item shipments, cross-month procurement, and independent sales/fulfilment/financial status.
+                </p>
+                <Link
+                  href={`/dashboard/projects?customer_id=${customer.id}&action=new`}
+                  className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-50 text-brand-700 hover:bg-brand-100 text-xs font-bold border border-brand-200 transition"
+                >
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  <span>Create Project File</span>
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* Site Visits & Technical Feasibility Surveys */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-brand-600" />
+                Site Visits & Technical Feasibility Surveys ({siteVisits.length})
+              </h3>
+              <Link
+                href={`/dashboard/site-visits?customer_id=${customer.id}&customer_name=${encodeURIComponent(customer.customer_name)}`}
+                className="text-xs font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1"
+              >
+                <span>+ New Survey</span>
+                <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
+            {siteVisits.length > 0 ? (
+              <div className="divide-y divide-slate-100">
+                {siteVisits.map((sv, idx) => (
+                  <div key={sv.id || idx} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-xs text-slate-900">
+                          {sv.visitNumber || `SV26000${idx + 1}`}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                          {sv.project_category || 'Audio-Visual Solutions'}
+                        </span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                            sv.status === 'COMPLETED'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}
+                        >
+                          {sv.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-700 font-semibold mt-1">
+                        {sv.roomType || 'Site Survey'} &bull; {sv.siteAddress}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Scheduled: {sv.scheduledDate} {sv.scheduled_time ? `(${sv.scheduled_time})` : ''} &bull; Tech: {sv.assignedTechnician || 'Vamshi Krishna'}
+                        {sv.measurements ? ` &bull; Dimensions: ${sv.measurements}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href="/dashboard/site-visits"
+                        className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                      >
+                        Open Survey
+                      </Link>
+                      <Link
+                        href={`/dashboard/quotations/new?customer_id=${customer.id}&customer_name=${encodeURIComponent(customer.customer_name)}&site_visit=${encodeURIComponent(sv.visitNumber || `SV26000${idx + 1}`)}`}
+                        className="px-2.5 py-1 rounded-lg bg-brand-50 hover:bg-brand-100 text-brand-700 font-bold text-xs border border-brand-200 transition"
+                      >
+                        Create Quote
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 py-4 text-center">No site visits recorded for this customer</p>
+            )}
+          </div>
+
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
               <Wrench className="w-4 h-4 text-brand-600" />
@@ -1111,6 +1414,8 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
           </div>
         </div>
       )}
+
+
 
       {/* Tab 7: TASKS & APPROVALS */}
       {activeTab === 'TASKS_APPROVALS' && (
@@ -1199,6 +1504,8 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
         </div>
       )}
 
+
+
       {/* Tab 8: UNIFIED TIMELINE */}
       {activeTab === 'TIMELINE' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
@@ -1230,6 +1537,8 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
           </div>
         </div>
       )}
+
+
 
       {/* Tab 9: COMMUNICATIONS & TALLY SYNC */}
       {activeTab === 'COMMUNICATIONS' && (
@@ -1314,6 +1623,288 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
           </div>
         </div>
       )}
+
+      {/* Tab: DOCUMENTS (Central Document Archive) */}
+      {activeTab === 'DOCUMENTS' && (
+        <div className="space-y-6">
+          {/* Header & Controls */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <FolderArchive className="w-5 h-5 text-brand-600" />
+                  Central Customer Document Archive
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Unified repository of all commercial proposals, proforma invoices, delivery challans, tax invoices, purchase orders, and physical signed/stamped copies.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setSelectedDocForUpload({
+                      document_type: 'QUOTATION',
+                      document_number: '',
+                      customer_id: customer.id,
+                      customer_name: customer.customer_name,
+                      company_name: customer.company_name || undefined,
+                    });
+                    setIsUploadModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-sm cursor-pointer"
+                >
+                  <Upload className="w-4 h-4" />
+                  Upload Signed / Stamped Copy
+                </button>
+              </div>
+            </div>
+
+            {/* Metrics Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-100">
+              <div className="p-3 bg-slate-50 rounded-xl">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Archived Docs</span>
+                <span className="text-base font-black text-slate-900 mt-0.5 block">{initialArchiveDocs.length}</span>
+              </div>
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+                <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block">Physical Signed Scans</span>
+                <span className="text-base font-black text-emerald-700 mt-0.5 block">
+                  {initialArchiveDocs.filter((d) => d.has_signed_copy).length} Verified
+                </span>
+              </div>
+              <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
+                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block">Proformas & Challans</span>
+                <span className="text-base font-black text-blue-700 mt-0.5 block">
+                  {initialArchiveDocs.filter((d) => d.document_type === 'PROFORMA_INVOICE' || d.document_type === 'DELIVERY_CHALLAN').length}
+                </span>
+              </div>
+              <div className="p-3 bg-purple-50 rounded-xl border border-purple-100">
+                <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider block">Tax Invoices</span>
+                <span className="text-base font-black text-purple-700 mt-0.5 block">
+                  {initialArchiveDocs.filter((d) => d.document_type === 'TAX_INVOICE').length}
+                </span>
+              </div>
+            </div>
+
+            {/* Filter & Search Controls */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mt-6 pt-6 border-t border-slate-100">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search by doc #, title, notes..."
+                  value={docSearch}
+                  onChange={(e) => setDocSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                {[
+                  { id: 'ALL', label: 'All Documents' },
+                  { id: 'QUOTATION', label: 'Quotations' },
+                  { id: 'PROFORMA_INVOICE', label: 'Proformas' },
+                  { id: 'DELIVERY_CHALLAN', label: 'Challans' },
+                  { id: 'TAX_INVOICE', label: 'Invoices' },
+                  { id: 'PURCHASE_ORDER', label: 'POs' },
+                  { id: 'SIGNED_SCAN', label: 'Signed Copies Only' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setDocTypeFilter(f.id)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer transition ${
+                      docTypeFilter === f.id
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Document List */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            {initialArchiveDocs
+              .filter((doc) => {
+                if (docTypeFilter === 'SIGNED_SCAN') return doc.has_signed_copy;
+                if (docTypeFilter !== 'ALL' && doc.document_type !== docTypeFilter) return false;
+                if (!docSearch.trim()) return true;
+                const term = docSearch.toLowerCase();
+                return (
+                  doc.document_number.toLowerCase().includes(term) ||
+                  doc.title.toLowerCase().includes(term) ||
+                  (doc.notes && doc.notes.toLowerCase().includes(term)) ||
+                  (doc.uploaded_by_name && doc.uploaded_by_name.toLowerCase().includes(term))
+                );
+              })
+              .length === 0 ? (
+              <div className="p-12 text-center">
+                <FolderArchive className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-slate-600">No matching archived documents found</p>
+                <p className="text-xs text-slate-400 mt-1">Try adjusting your search terms or filters above.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {initialArchiveDocs
+                  .filter((doc) => {
+                    if (docTypeFilter === 'SIGNED_SCAN') return doc.has_signed_copy;
+                    if (docTypeFilter !== 'ALL' && doc.document_type !== docTypeFilter) return false;
+                    if (!docSearch.trim()) return true;
+                    const term = docSearch.toLowerCase();
+                    return (
+                      doc.document_number.toLowerCase().includes(term) ||
+                      doc.title.toLowerCase().includes(term) ||
+                      (doc.notes && doc.notes.toLowerCase().includes(term)) ||
+                      (doc.uploaded_by_name && doc.uploaded_by_name.toLowerCase().includes(term))
+                    );
+                  })
+                  .map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="p-4 sm:p-5 hover:bg-slate-50/60 transition flex flex-col md:flex-row md:items-center justify-between gap-4"
+                    >
+                      <div className="flex items-start gap-3.5">
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                            doc.document_type === 'QUOTATION'
+                              ? 'bg-blue-50 text-blue-600 border border-blue-200'
+                              : doc.document_type === 'PROFORMA_INVOICE'
+                              ? 'bg-indigo-50 text-indigo-600 border border-indigo-200'
+                              : doc.document_type === 'DELIVERY_CHALLAN'
+                              ? 'bg-amber-50 text-amber-600 border border-amber-200'
+                              : doc.document_type === 'TAX_INVOICE'
+                              ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                              : 'bg-slate-100 text-slate-600 border border-slate-200'
+                          }`}
+                        >
+                          <FileText className="w-5 h-5" />
+                        </div>
+
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-xs text-slate-900">
+                              {doc.document_number}
+                            </span>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                doc.document_type === 'QUOTATION'
+                                  ? 'bg-blue-50 text-blue-700'
+                                  : doc.document_type === 'PROFORMA_INVOICE'
+                                  ? 'bg-indigo-50 text-indigo-700'
+                                  : doc.document_type === 'DELIVERY_CHALLAN'
+                                  ? 'bg-amber-50 text-amber-700'
+                                  : doc.document_type === 'TAX_INVOICE'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              {doc.document_type.replace('_', ' ')}
+                            </span>
+                            {doc.status && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-100 text-slate-600">
+                                {doc.status}
+                              </span>
+                            )}
+                            {doc.has_signed_copy ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <FileCheck className="w-3 h-3 text-emerald-600" />
+                                Signed & Stamped Scan
+                              </span>
+                            ) : (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-400">
+                                Unsigned Scan Pending
+                              </span>
+                            )}
+                          </div>
+
+                          <h4 className="text-xs font-semibold text-slate-800 mt-1">{doc.title}</h4>
+
+                          <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-1 flex-wrap">
+                            <span>Date: {doc.date}</span>
+                            {doc.amount !== undefined && doc.amount > 0 && (
+                              <span className="font-bold text-slate-700">
+                                Amount: ₹{Math.round(doc.amount).toLocaleString('en-IN')}
+                              </span>
+                            )}
+                            {doc.related_transaction_number && (
+                              <span className="font-mono text-slate-500">Ref: {doc.related_transaction_number}</span>
+                            )}
+                            {doc.uploaded_by_name && (
+                              <span>By: {doc.uploaded_by_name}</span>
+                            )}
+                          </div>
+
+                          {doc.notes && (
+                            <p className="text-[11px] text-slate-500 mt-1 italic">&ldquo;{doc.notes}&rdquo;</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+                        {doc.original_pdf_url && (
+                          <Link
+                            href={doc.original_pdf_url}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            View Generated Doc
+                          </Link>
+                        )}
+
+                        {doc.has_signed_copy && doc.signed_scan_url ? (
+                          <a
+                            href={doc.signed_scan_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            View Physical Scan
+                          </a>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setSelectedDocForUpload({
+                                document_type: doc.document_type,
+                                document_number: doc.document_number,
+                                customer_id: customer.id,
+                                customer_name: customer.customer_name,
+                                company_name: customer.company_name || undefined,
+                                related_transaction_number: doc.related_transaction_number,
+                                original_generated_pdf_url: doc.original_pdf_url,
+                              });
+                              setIsUploadModalOpen(true);
+                            }}
+                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            Upload Signed Scan
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Upload Signed Document */}
+      <UploadSignedDocumentModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        defaultDocument={selectedDocForUpload}
+        onSuccess={() => {
+          setIsUploadModalOpen(false);
+        }}
+      />
+
+
     </div>
   );
 }

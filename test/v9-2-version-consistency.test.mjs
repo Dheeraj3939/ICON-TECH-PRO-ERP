@@ -88,14 +88,16 @@ test('ICON TECH PRO ERP V9.2 — Version Consistency & Enterprise Identity Suite
     assert.match(content, /V9\.1_FINAL_BACKUP_2026-09-22/, 'Backup page must preserve frozen historical V9.1 milestone reference');
   });
 
-  await t.test('10. Encryption Salt Backward Compatibility (Intentional Preservation)', () => {
+  await t.test('10. Encryption Salt & Fail-Closed Security (Static Fallback Elimination)', () => {
     const gmailCryptoPath = path.join(rootDir, 'src', 'lib', 'integrations', 'gmail-crypto.ts');
     const gmailCrypto = fs.readFileSync(gmailCryptoPath, 'utf8');
-    assert.match(gmailCrypto, /ICON-TECH-PRO-ERP-GMAIL-ENC-FALLBACK-V9\.1/, 'Gmail encryption salt must remain preserved for token backward compatibility');
+    assert.doesNotMatch(gmailCrypto, /'ICON-TECH-PRO-ERP-GMAIL-ENC-FALLBACK-V9\.1'/, 'Gmail crypto must not use hardcoded static fallback string');
+    assert.match(gmailCrypto, /GMAIL_TOKEN_ENCRYPTION_KEY is not configured/, 'Gmail crypto must fail closed when key is missing');
 
     const zohoCryptoPath = path.join(rootDir, 'src', 'lib', 'integrations', 'zoho-crypto.ts');
     const zohoCrypto = fs.readFileSync(zohoCryptoPath, 'utf8');
-    assert.match(zohoCrypto, /ICON-TECH-PRO-ERP-ZOHO-ENC-FALLBACK-V9\.1/, 'Zoho encryption salt must remain preserved for token backward compatibility');
+    assert.doesNotMatch(zohoCrypto, /'ICON-TECH-PRO-ERP-ZOHO-ENC-FALLBACK-V9\.1'/, 'Zoho crypto must not use hardcoded static fallback string');
+    assert.match(zohoCrypto, /ZOHO_TOKEN_ENCRYPTION_KEY is not configured/, 'Zoho crypto must fail closed when key is missing');
   });
 
   await t.test('11. Company & Entity Absolute Purity Invariant', () => {

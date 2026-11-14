@@ -17,6 +17,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { PRODUCT_CATEGORIES, STAFF_MEMBERS } from '@/lib/constants/erp-data';
+import { ENQUIRY_SOURCES, isCanonicalEnquirySource } from '@/lib/constants/customer-source';
 import { updateEnquiry } from '@/lib/actions/enquiries';
 import type { Enquiry, EnquiryStatus } from '@/types/erp';
 import type { CustomerType } from '@/types/customer';
@@ -234,8 +235,30 @@ export function EditEnquiryModal({ isOpen, onClose, onSuccess, enquiry }: EditEn
             </div>
           </div>
 
-          {/* Category & Budget */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Category, Budget, Salesperson & Source */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Enquiry Source *
+              </label>
+              <select
+                value={formData.source}
+                onChange={(e) => setFormData({ ...formData, source: e.target.value })}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-brand-500 outline-none"
+              >
+                {!isCanonicalEnquirySource(formData.source) && formData.source && (
+                  <option value={formData.source}>
+                    {formData.source} (Historical / Legacy)
+                  </option>
+                )}
+                {ENQUIRY_SOURCES.map((src) => (
+                  <option key={src} value={src}>
+                    {src}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Product Category

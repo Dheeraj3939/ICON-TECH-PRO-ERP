@@ -71,8 +71,11 @@ export type AccountLifecycleStatus =
   | 'ACTIVE'
   | 'INVITED'
   | 'PENDING'
+  | 'PENDING_ACTIVATION'
   | 'SUSPENDED'
-  | 'DEACTIVATED';
+  | 'DEACTIVATED'
+  | 'DISABLED'
+  | 'OFFBOARDED';
 
 export interface ControlledModuleDefinition {
   key: string;
@@ -101,7 +104,8 @@ export interface AppRole {
 export interface ManagedUser {
   id: string;
   name: string;
-  email: string;
+  email: string; // Primary ERP Login Email (any valid domain: Gmail, Outlook, company, etc.)
+  corporate_email?: string; // Optional secondary corporate address
   phone?: string;
   role: string;
   status: AccountLifecycleStatus | 'INACTIVE';
@@ -109,6 +113,7 @@ export interface ManagedUser {
   department?: string;
   designation?: string;
   notes?: string;
+  has_mailbox_integration?: boolean;
   created_at: string;
   updated_at?: string;
   last_login?: string;

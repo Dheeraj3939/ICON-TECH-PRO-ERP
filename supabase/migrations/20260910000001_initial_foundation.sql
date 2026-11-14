@@ -12,11 +12,11 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ------------------------------------------------------------------------------
--- 1. Organizations & Business Entities (ICON TECH PRO vs. Sreeja Enterprises)
+-- 1. Organizations & Business Entities (ICON TECH PRO only)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS organizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    entity_code VARCHAR(50) UNIQUE NOT NULL, -- 'ICON_TECH_PRO', 'SREEJA_ENTERPRISES'
+    entity_code VARCHAR(50) UNIQUE NOT NULL, -- 'ICON_TECH_PRO' only
     legal_name VARCHAR(150) NOT NULL,
     tagline VARCHAR(255),
     gstin VARCHAR(15),
@@ -257,21 +257,8 @@ USING (public.current_user_role() IN ('Managing Director', 'Admin / BDM'));
 -- ------------------------------------------------------------------------------
 -- 8. Seed Initial Organizations (Legal/tax/banking fields configured via ERP Settings)
 -- ------------------------------------------------------------------------------
-INSERT INTO organizations (
-    entity_code, legal_name, state_code, is_active
-) VALUES
-(
-    'ICON_TECH_PRO',
-    'ICON TECH PRO',
-    '36',
-    TRUE
-),
-(
-    'SREEJA_ENTERPRISES',
-    'Sreeja Enterprises',
-    '36',
-    TRUE
-)
+INSERT INTO organizations (entity_code, legal_name, state_code, is_active)
+VALUES ('ICON_TECH_PRO', 'ICON TECH PRO', '36', TRUE)
 ON CONFLICT (entity_code) DO NOTHING;
 
 -- ------------------------------------------------------------------------------

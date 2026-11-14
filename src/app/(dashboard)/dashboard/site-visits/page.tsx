@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import {
   getSiteVisits,
+  createSiteVisit,
   getSiteVisitIntelligence,
   generatePreVisitBrief,
   recordPostVisitFindings,
@@ -38,6 +39,13 @@ import {
 import { uploadAttachment } from '@/lib/actions/attachments';
 import type { SiteVisitDetails, SiteVisitIntelligence } from '@/types/erp';
 import EditSiteVisitModal from '@/components/modals/EditSiteVisitModal';
+import { TechnicalEvaluationModal } from '@/components/technical-evaluation/TechnicalEvaluationModal';
+import {
+  SITE_VISIT_PROJECT_CATEGORIES,
+  type SiteVisitProjectCategory,
+  type TechnicalEvaluation,
+} from '@/types/technical-evaluation';
+import { getTechnicalEvaluationById } from '@/lib/actions/technical-evaluations';
 
 export default function SiteVisitsPage() {
   const [visits, setVisits] = useState<SiteVisitDetails[]>([]);
@@ -62,9 +70,22 @@ export default function SiteVisitsPage() {
   const [findingNotes, setFindingNotes] = useState('');
   const [syncConfirmedBy, setSyncConfirmedBy] = useState('Vamshi Krishna (Lead Technician)');
 
+  // Technical Evaluation state
+  const [isTechEvalModalOpen, setIsTechEvalModalOpen] = useState(false);
+  const [selectedEvaluation, setSelectedEvaluation] = useState<TechnicalEvaluation | null>(null);
+  const [evalInitialContext, setEvalInitialContext] = useState<any>(null);
+
   // New Survey Form state
   const [customerName, setCustomerName] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const [siteAddress, setSiteAddress] = useState('');
+  const [projectCategory, setProjectCategory] = useState<SiteVisitProjectCategory>('Audio-Visual Solutions');
+  const [otherProjectDescription, setOtherProjectDescription] = useState('');
+  const [contactPerson, setContactPerson] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [enquiryRef, setEnquiryRef] = useState('');
+  const [salespersonName, setSalespersonName] = useState('Dheeraj Reddy');
+  const [visitPurpose, setVisitPurpose] = useState('Site Measurement & Feasibility Survey');
   const [roomType, setRoomType] = useState('Home Theater');
   const [dimensions, setDimensions] = useState('22ft L x 16ft W x 10.5ft H');
   const [wallType, setWallType] = useState('Brick / Concrete');
@@ -72,6 +93,9 @@ export default function SiteVisitsPage() {
   const [powerAvailable, setPowerAvailable] = useState(true);
   const [assignedTechnician, setAssignedTechnician] = useState('Vamshi Krishna');
   const [scheduledDate, setScheduledDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [scheduledTime, setScheduledTime] = useState('11:00 AM');
+  const [nextAction, setNextAction] = useState('Prepare Technical Evaluation & BoM');
+  const [followUpDate, setFollowUpDate] = useState(() => new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -79,6 +103,39 @@ export default function SiteVisitsPage() {
   const loadVisits = async () => {
     const data = await getSiteVisits();
     setVisits(data);
+  };
+
+  const handleOpenEvaluation = async (visit: SiteVisitDetails) => {
+    if (visit.technical_evaluation_id) {
+      const found = await getTechnicalEvaluationById(visit.technical_evaluation_id);
+      if (found) {
+        setSelectedEvaluation(found);
+        setEvalInitialContext(null);
+        setIsTechEvalModalOpen(true);
+        return;
+      }
+    }
+    // Fallback: create new with context
+    handleCreateEvaluation(visit);
+  };
+
+  const handleCreateEvaluation = (visit: SiteVisitDetails) => {
+    setSelectedEvaluation(null);
+    setEvalInitialContext({
+      customer_id: visit.customer_id,
+      customer_name: visit.customer_name,
+      company_name: visit.company_name,
+      enquiry_id: visit.enquiry_id,
+      enquiry_number: visit.enquiry_number,
+      site_visit_id: visit.id,
+      site_visit_number: visit.visitNumber,
+      project_category: visit.project_category,
+      site_address: visit.siteAddress,
+      measurements: visit.measurements,
+      notes: visit.notes,
+      assigned_technician: visit.assignedTechnician,
+    });
+    setIsTechEvalModalOpen(true);
   };
 
   useEffect(() => {
@@ -195,35 +252,46 @@ export default function SiteVisitsPage() {
     if (!customerName || !siteAddress) return;
     setSubmitting(true);
     try {
-      const newVisitNum = `SV26000${visits.length + 1}`;
-      const newVisit: SiteVisitDetails = {
-        id: `SV-${Date.now()}`,
-        visitNumber: newVisitNum,
-        required: true,
+      const res = await createSiteVisit({
+        customer_name: customerName,
+        company_name: companyName || undefined,
         siteAddress,
         roomType,
         measurements: dimensions,
-        scheduledDate,
+        project_category: projectCategory,
+        other_project_description: projectCategory === 'Other Projects' ? otherProjectDescription : undefined,
+        contact_person: contactPerson || customerName,
+        contact_phone: contactPhone || undefined,
+        enquiry_number: enquiryRef || undefined,
+        salesperson_name: salespersonName,
         assignedTechnician,
-        status: 'SCHEDULED',
+        purpose: visitPurpose,
+        scheduledDate,
+        scheduled_time: scheduledTime,
+        next_action: nextAction,
+        follow_up_date: followUpDate,
         notes: `${notes} [Wall: ${wallType}, Conduit: ${conduitVerified ? 'Yes' : 'No'}, Power: ${powerAvailable ? 'Yes' : 'No'}]`,
-      };
+        photos: photoUrl ? [photoUrl] : [],
+      });
 
-      if (photoUrl) {
-        await uploadAttachment({
-          entity_type: 'site_visit',
-          entity_id: newVisit.id || `SV-${Date.now()}`,
-          file_name: `Site_Photo_${newVisitNum}.jpg`,
-          file_url: photoUrl,
-        });
+      if (res.success && res.data) {
+        if (photoUrl) {
+          await uploadAttachment({
+            entity_type: 'site_visit',
+            entity_id: res.data.id || `SV-${Date.now()}`,
+            file_name: `Site_Photo_${res.data.visitNumber}.jpg`,
+            file_url: photoUrl,
+          });
+        }
+
+        await loadVisits();
+        setIsNewSurveyModalOpen(false);
+        setCustomerName('');
+        setCompanyName('');
+        setSiteAddress('');
+        setNotes('');
+        setPhotoUrl('');
       }
-
-      setVisits((prev) => [newVisit, ...prev]);
-      setIsNewSurveyModalOpen(false);
-      setCustomerName('');
-      setSiteAddress('');
-      setNotes('');
-      setPhotoUrl('');
     } finally {
       setSubmitting(false);
     }
@@ -265,9 +333,14 @@ export default function SiteVisitsPage() {
           >
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="px-2 py-0.5 rounded bg-slate-100 font-bold text-slate-700 text-xs">
-                  {sv.visitNumber || `SV26000${idx + 1}`}
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="px-2 py-0.5 rounded bg-slate-100 font-bold text-slate-700 text-xs">
+                    {sv.visitNumber || `SV26000${idx + 1}`}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-200">
+                    {sv.project_category || 'Audio-Visual Solutions'}
+                  </span>
+                </div>
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                     sv.status === 'COMPLETED'
@@ -280,6 +353,9 @@ export default function SiteVisitsPage() {
               </div>
 
               <div>
+                <span className="text-[11px] font-bold text-slate-500 block">
+                  {sv.customer_name || 'Customer Site'}
+                </span>
                 <h3 className="font-bold text-slate-900 text-base">{sv.roomType || 'Home Theater / Boardroom'}</h3>
                 <p className="text-xs text-slate-600 flex items-start gap-1.5 mt-1.5">
                   <MapPin className="w-3.5 h-3.5 text-brand-600 flex-shrink-0 mt-0.5" />
@@ -307,9 +383,46 @@ export default function SiteVisitsPage() {
                     <Clock className="w-3.5 h-3.5 text-slate-400" />
                     Scheduled:
                   </span>
-                  <strong className="text-slate-800">{sv.scheduledDate}</strong>
+                  <strong className="text-slate-800">
+                    {sv.scheduledDate} {sv.scheduled_time ? `(${sv.scheduled_time})` : ''}
+                  </strong>
                 </div>
+                {sv.next_action && (
+                  <div className="pt-1 border-t border-slate-200/60 text-[11px] text-slate-500 flex items-center justify-between">
+                    <span>Next: {sv.next_action}</span>
+                    {sv.follow_up_date && <span>Due: {sv.follow_up_date}</span>}
+                  </div>
+                )}
               </div>
+
+              {/* Technical Evaluation Status Banner */}
+              {sv.technical_evaluation_id ? (
+                <div className="flex items-center justify-between p-2 rounded-xl bg-purple-50 border border-purple-200 text-xs">
+                  <span className="font-bold text-purple-900 flex items-center gap-1">
+                    <Wrench className="w-3.5 h-3.5 text-purple-600" />
+                    Evaluation: {sv.technical_evaluation_status || 'Reviewed'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEvaluation(sv)}
+                    className="text-purple-700 hover:text-purple-900 font-bold text-[11px] underline"
+                  >
+                    View Evaluation &rarr;
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                  <span className="text-slate-500 text-[11px]">No Technical Evaluation</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCreateEvaluation(sv)}
+                    className="text-brand-600 hover:text-brand-700 font-bold text-[11px] flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Tech Evaluation
+                  </button>
+                </div>
+              )}
 
               {sv.notes && (
                 <p className="text-slate-500 text-[11px] italic bg-slate-50/50 p-2.5 rounded-lg border border-slate-100">
@@ -320,7 +433,7 @@ export default function SiteVisitsPage() {
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
               <span className="text-[11px] text-slate-400 font-medium">Actions</span>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={() => setEditingVisit(sv)}
@@ -332,6 +445,15 @@ export default function SiteVisitsPage() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => handleOpenEvaluation(sv)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs border border-purple-200 transition shadow-xs"
+                  title="Technical Evaluation Feasibility Report"
+                >
+                  <Wrench className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Tech Eval</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleOpenIntelligence(sv)}
                   className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-violet-50 hover:bg-violet-100 text-violet-700 font-bold text-xs border border-violet-200 transition shadow-sm"
                   title="Open AI Survey Intelligence & Brief"
@@ -340,7 +462,7 @@ export default function SiteVisitsPage() {
                   <span>AI Brief</span>
                 </button>
                 <Link
-                  href={`/dashboard/quotations?site_visit=${encodeURIComponent(sv.visitNumber || `SV26000${idx + 1}`)}&room_type=${encodeURIComponent(sv.roomType || '')}&dimensions=${encodeURIComponent(sv.measurements || '')}&notes=${encodeURIComponent(sv.notes || '')}`}
+                  href={`/dashboard/quotations/new?site_visit=${encodeURIComponent(sv.visitNumber || `SV26000${idx + 1}`)}&customer_name=${encodeURIComponent(sv.customer_name || '')}&customer_id=${encodeURIComponent(sv.customer_id || '')}&room_type=${encodeURIComponent(sv.roomType || '')}&dimensions=${encodeURIComponent(sv.measurements || '')}&notes=${encodeURIComponent(sv.notes || '')}`}
                   className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-bold text-xs border border-brand-200 transition"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5 text-brand-600" />
@@ -372,16 +494,94 @@ export default function SiteVisitsPage() {
             </div>
 
             <form onSubmit={handleCreateSurvey} className="space-y-3">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Customer / Site Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Dr. Reddy Villa / T-Hub"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Customer / Client Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Cyient Technologies / Dr. Reddy"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Company / Organization</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Cyient Limited"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Project Category *</label>
+                  <select
+                    value={projectCategory}
+                    onChange={(e) => setProjectCategory(e.target.value as SiteVisitProjectCategory)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 font-semibold text-slate-800"
+                  >
+                    {SITE_VISIT_PROJECT_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Related Enquiry Ref</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. ENQ260001"
+                    value={enquiryRef}
+                    onChange={(e) => setEnquiryRef(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              {projectCategory === 'Other Projects' && (
+                <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200">
+                  <label className="block font-bold text-amber-900 mb-1 text-xs">
+                    Specify Project Category Description *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Public Address System, Acoustic Treatment"
+                    value={otherProjectDescription}
+                    onChange={(e) => setOtherProjectDescription(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-amber-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Site Contact Person</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Suresh Kumar (Facilities Mgr)"
+                    value={contactPerson}
+                    onChange={(e) => setContactPerson(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Contact Phone</label>
+                  <input
+                    type="tel"
+                    placeholder="e.g. 9849012345"
+                    value={contactPhone}
+                    onChange={(e) => setContactPhone(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono"
+                  />
+                </div>
               </div>
 
               <div>
@@ -394,6 +594,50 @@ export default function SiteVisitsPage() {
                   onChange={(e) => setSiteAddress(e.target.value)}
                   className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Visit Purpose</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Physical layout, conduit feasibility check"
+                    value={visitPurpose}
+                    onChange={(e) => setVisitPurpose(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Salesperson</label>
+                  <input
+                    type="text"
+                    value={salespersonName}
+                    onChange={(e) => setSalespersonName(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Scheduled Date</label>
+                  <input
+                    type="date"
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Scheduled Time</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 11:00 AM"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -441,11 +685,33 @@ export default function SiteVisitsPage() {
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Technician</label>
+                  <label className="block font-bold text-slate-700 mb-1">Assigned Technical Engineer</label>
                   <input
                     type="text"
                     value={assignedTechnician}
                     onChange={(e) => setAssignedTechnician(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 font-semibold text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Next Action</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Prepare BoM & Quotation"
+                    value={nextAction}
+                    onChange={(e) => setNextAction(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Follow-up Date</label>
+                  <input
+                    type="date"
+                    value={followUpDate}
+                    onChange={(e) => setFollowUpDate(e.target.value)}
                     className="w-full px-3 py-1.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>
@@ -1040,6 +1306,15 @@ export default function SiteVisitsPage() {
         isOpen={!!editingVisit}
         onClose={() => setEditingVisit(null)}
         visit={editingVisit}
+        onSuccess={loadVisits}
+      />
+
+      {/* Technical Evaluation Modal */}
+      <TechnicalEvaluationModal
+        isOpen={isTechEvalModalOpen}
+        onClose={() => setIsTechEvalModalOpen(false)}
+        evaluation={selectedEvaluation}
+        initialContext={evalInitialContext}
         onSuccess={loadVisits}
       />
     </div>

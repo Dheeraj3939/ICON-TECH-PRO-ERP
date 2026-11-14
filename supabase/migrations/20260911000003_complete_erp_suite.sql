@@ -181,10 +181,7 @@ CREATE TABLE IF NOT EXISTS warehouses (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO warehouses (code, name, address) VALUES
-    ('WH-HYD-MAIN', 'Central Hyderabad Depot (SR Nagar)', 'Ameer Estate, SR Nagar, Hyderabad'),
-    ('WH-HYD-RENTAL', 'Sreeja Rental & Demo Hub', 'Banjara Hills Road No. 12, Hyderabad')
-ON CONFLICT (code) DO NOTHING;
+-- UAT and fresh installations create only synthetic warehouse data when needed.
 
 CREATE TABLE IF NOT EXISTS inventory_stock (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -494,7 +491,7 @@ CREATE TABLE IF NOT EXISTS installations (
 CREATE TABLE IF NOT EXISTS service_tickets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ticket_number VARCHAR(30) UNIQUE NOT NULL, -- SRV260001
-    entity_code VARCHAR(30) NOT NULL DEFAULT 'SREEJA_ENTERPRISES',
+    entity_code VARCHAR(30) NOT NULL DEFAULT 'ICON_TECH_PRO',
     customer_id UUID NOT NULL REFERENCES customers(id),
     customer_name VARCHAR(150) NOT NULL,
     product_name VARCHAR(200),
@@ -511,7 +508,7 @@ CREATE TABLE IF NOT EXISTS service_tickets (
 CREATE TABLE IF NOT EXISTS amc_contracts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     contract_number VARCHAR(40) UNIQUE NOT NULL, -- AMC260001
-    entity_code VARCHAR(30) NOT NULL DEFAULT 'SREEJA_ENTERPRISES',
+    entity_code VARCHAR(30) NOT NULL DEFAULT 'ICON_TECH_PRO',
     customer_id UUID NOT NULL REFERENCES customers(id),
     customer_name VARCHAR(150) NOT NULL,
     start_date DATE NOT NULL,
@@ -525,7 +522,7 @@ CREATE TABLE IF NOT EXISTS amc_contracts (
 CREATE TABLE IF NOT EXISTS equipment_rentals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     rental_number VARCHAR(40) UNIQUE NOT NULL, -- RNT260001
-    entity_code VARCHAR(30) NOT NULL DEFAULT 'SREEJA_ENTERPRISES',
+    entity_code VARCHAR(30) NOT NULL DEFAULT 'ICON_TECH_PRO',
     customer_id UUID NOT NULL REFERENCES customers(id),
     customer_name VARCHAR(150) NOT NULL,
     product_name VARCHAR(200) NOT NULL,

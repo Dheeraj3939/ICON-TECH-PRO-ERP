@@ -6,10 +6,11 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { INITIAL_QUOTATIONS, INITIAL_ORDERS, DISCOUNT_APPROVAL_RULES } from '@/lib/constants/erp-data';
 import { getNextQuotationNumber, getNextOrderNumber } from '@/lib/utils/sequence';
-import { requireRole } from '@/lib/auth/session';
+import { requireRole, requireAuth } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { createSalesOrder } from '@/lib/actions/orders';
 import { getCompanySettings } from '@/lib/actions/company-settings';
+import { findByIdOrCode, isUuid, sanitizeUuid, sanitizeSearchTerm } from '@/lib/supabase/db-helpers';
 import type { Quotation, QuotationStatus, SalesOrder, QuotationVersion, QuotationRevision, ProjectSection, DiscountApprovalRequest } from '@/types/erp';
 import type { QuotationFormValues } from '@/lib/validations/erp';
 import {
@@ -62,97 +63,115 @@ function getOrdersStore(): SalesOrder[] {
   return globalThis.__ICON_ORDERS__;
 }
 
+function parseQuotationRow(q: any): Quotation {
+  let terms = q.terms_conditions;
+  let pos = q.place_of_supply || '36-TELANGANA';
+  let dispatch =
+    q.dispatch_from ||
+    '7-1-62/A, FLAT NO-503, 5 TH FLOOR, AMEER ESTATE, SANJEEVA REDDY NAGAR, Hyderabad, TELANGANA, 500038';
+  let inclSig = q.include_signature ?? true;
+  let cleanNotes = q.notes;
+  let qFormat = q.quotation_format || 'STANDARD';
+  let pSections = q.project_sections || [];
+
+  if (q.notes && typeof q.notes === 'string' && q.notes.startsWith('{')) {
+    try {
+      const meta = JSON.parse(q.notes);
+      if (meta.terms_conditions) terms = meta.terms_conditions;
+      if (meta.place_of_supply) pos = meta.place_of_supply;
+      if (meta.dispatch_from) dispatch = meta.dispatch_from;
+      if (meta.include_signature !== undefined) inclSig = meta.include_signature;
+      if (meta.quotation_format) qFormat = meta.quotation_format;
+      if (meta.project_sections) pSections = meta.project_sections;
+      if (meta.custom_notes !== undefined) cleanNotes = meta.custom_notes;
+    } catch {}
+  }
+
+  return {
+    ...q,
+    terms_conditions: terms,
+    place_of_supply: pos,
+    dispatch_from: dispatch,
+    include_signature: inclSig,
+    quotation_format: qFormat,
+    project_sections: pSections,
+    notes: cleanNotes,
+    items: Array.isArray(q.items) ? q.items : [],
+  } as Quotation;
+}
+
+async function findQuotationRecord(idOrNumber: string): Promise<Quotation | null> {
+  const decoded = decodeURIComponent(idOrNumber || '').trim();
+  if (!decoded) return null;
+
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const row = await findByIdOrCode<any>(
+        admin,
+        'quotations',
+        decoded,
+        'quotation_number',
+        '*, items:quotation_items(*)'
+      );
+      if (row) return parseQuotationRow(row);
+      return null;
+    } catch (err) {
+      console.warn('Supabase findQuotationRecord warning:', err);
+    }
+  }
+
+  return (
+    getStore().find(
+      (q) =>
+        q.id === idOrNumber ||
+        q.quotation_number === idOrNumber ||
+        q.id === decoded ||
+        q.quotation_number === decoded
+    ) || null
+  );
+}
+
 export async function getQuotations(filters?: {
   status?: string;
   search?: string;
+  customer_id?: string;
 }): Promise<{ quotations: Quotation[]; total: number }> {
+  const authUser = await requireAuth();
   try {
     const isAvailable = await isSupabaseAvailable();
     if (isAvailable) {
-      const supabase = await createClient();
-      let query = supabase.from('quotations').select('*, items:quotation_items(*)', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('quotations').select('*, items:quotation_items(*)', { count: 'exact' });
 
       if (filters?.status && filters.status !== 'ALL') {
         query = query.eq('status', filters.status);
       }
+      if (filters?.customer_id) {
+        query = query.eq('customer_id', filters.customer_id);
+      }
       if (filters?.search) {
-        const s = filters.search.trim();
-        query = query.or(`quotation_number.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+        const s = sanitizeSearchTerm(filters.search);
+        if (s) {
+          query = query.or(`quotation_number.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+        }
       }
 
       query = query.order('created_at', { ascending: false });
-      let { data, error, count } = await query;
+      const { data, error, count } = await query;
 
-      if (error) {
-        const admin = createAdminClient();
-        let adminQuery = admin.from('quotations').select('*, items:quotation_items(*)', { count: 'exact' });
-        if (filters?.status && filters.status !== 'ALL') {
-          adminQuery = adminQuery.eq('status', filters.status);
-        }
-        if (filters?.search) {
-          const s = filters.search.trim();
-          adminQuery = adminQuery.or(`quotation_number.ilike.%${s}%,customer_name.ilike.%${s}%`);
-        }
-        const adminRes = await adminQuery;
-        if (!adminRes.error && adminRes.data && adminRes.data.length > 0) {
-          data = adminRes.data;
-          count = adminRes.count;
-          error = null;
-        }
-      }
-
-      if (data) {
-        if (data.length === 0) {
-          return { quotations: [], total: count ?? 0 };
-        }
-        const formatted = (data as any[]).map((q) => {
-          let terms = q.terms_conditions;
-          let pos = q.place_of_supply || '36-TELANGANA';
-          let dispatch = q.dispatch_from || '7-1-62/A, FLAT NO-503, 5 TH FLOOR, AMEER ESTATE, SANJEEVA REDDY NAGAR, Hyderabad, TELANGANA, 500038';
-          let inclSig = q.include_signature ?? true;
-          let cleanNotes = q.notes;
-          let qFormat = q.quotation_format || 'STANDARD';
-          let pSections = q.project_sections || [];
-
-          if (q.notes && typeof q.notes === 'string' && q.notes.startsWith('{')) {
-            try {
-              const meta = JSON.parse(q.notes);
-              if (meta.terms_conditions) terms = meta.terms_conditions;
-              if (meta.place_of_supply) pos = meta.place_of_supply;
-              if (meta.dispatch_from) dispatch = meta.dispatch_from;
-              if (meta.include_signature !== undefined) inclSig = meta.include_signature;
-              if (meta.quotation_format) qFormat = meta.quotation_format;
-              if (meta.project_sections) pSections = meta.project_sections;
-              cleanNotes = meta.custom_notes || '';
-            } catch {}
-          }
-
-          return {
-            ...q,
-            place_of_supply: pos,
-            dispatch_from: dispatch,
-            terms_conditions: terms || [
-              'Payment : 100% ADVANCE PAYMENT',
-              'Taxes : GST 18% INCLUSIVE',
-              'Delivery : IMMEDIATELY',
-              'Warranty : AS PER COMPANY TERMS',
-              'Validity : 7 Days',
-              'TRANSPORTATION AND INSTALLATION CHARGES INCLUSIVE',
-            ],
-            bank_details: q.bank_details || {
-              bank_name: 'IDBI Bank',
-              account_holder: 'ICON TECH PRO',
-              account_number: '0426653800000161',
-              ifsc_code: 'IBKL0000426',
-              branch: 'BANDRI COMPLEX',
-            },
-            include_signature: inclSig,
-            notes: cleanNotes,
-            quotation_format: qFormat,
-            project_sections: pSections,
-          } as Quotation;
-        });
-        return { quotations: formatted, total: count ?? formatted.length };
+      if (!error && data) {
+        const formatted = (data as any[]).map(parseQuotationRow);
+        const canViewCosts = ['Managing Director', 'Admin / BDM', 'Accounts'].includes(authUser.role);
+        const safeFormatted = canViewCosts
+          ? formatted
+          : formatted.map((q) => ({
+              ...q,
+              total_cost: 0,
+              margin_pct: 0,
+              items: (q.items || []).map((it) => ({ ...it, purchase_price: 0, supplier_id: undefined })),
+            }));
+        return { quotations: safeFormatted, total: count ?? safeFormatted.length };
       }
     }
   } catch {
@@ -164,7 +183,14 @@ export async function getQuotations(filters?: {
   if (filters?.status && filters.status !== 'ALL') {
     filtered = filtered.filter((q) => q.status === filters.status);
   }
-  if (filters?.search) {
+  if (filters?.customer_id) {
+    const s = (filters.search || '').toLowerCase();
+    filtered = filtered.filter(
+      (q) =>
+        q.customer_id === filters.customer_id ||
+        (s && (q.customer_name.toLowerCase().includes(s) || (q.company_name && q.company_name.toLowerCase().includes(s))))
+    );
+  } else if (filters?.search) {
     const s = filters.search.toLowerCase();
     filtered = filtered.filter(
       (q) =>
@@ -181,13 +207,25 @@ export async function getQuotations(filters?: {
  * Retrieve a single quotation by ID or quotation number.
  */
 export async function getQuotationById(id: string): Promise<Quotation | null> {
-  const decodedId = decodeURIComponent(id || '');
-  const { quotations } = await getQuotations();
-  let found = quotations.find((q) => q.id === id || q.quotation_number === id || q.id === decodedId || q.quotation_number === decodedId);
-  if (!found) {
-    found = INITIAL_QUOTATIONS.find((q) => q.id === id || q.quotation_number === id || q.id === decodedId || q.quotation_number === decodedId);
+  const authUser = await requireAuth();
+  let found = await findQuotationRecord(id);
+  if (!found) return null;
+
+  // Confidential purchase cost & margin isolation:
+  // Strictly redact internal purchase prices if user is not Managing Director, Admin, or Accounts
+  const canViewCosts = ['Managing Director', 'Admin / BDM', 'Accounts'].includes(authUser.role);
+  if (!canViewCosts && found.items) {
+    found = {
+      ...found,
+      items: found.items.map((it) => ({
+        ...it,
+        purchase_price: 0,
+        supplier_id: undefined,
+      })),
+    };
   }
-  return found || null;
+
+  return found;
 }
 
 export async function createQuotation(
@@ -205,11 +243,13 @@ export async function createQuotation(
     const userRole = authUser.role;
 
     // 2. Authoritative Financial Recalculation (Never trust client sums)
+    const isInclusive = Boolean(payload.is_gst_inclusive || payload.pricing_mode === 'INCLUSIVE');
     let subtotal = 0;
     let totalDiscount = 0;
     let totalCost = 0;
     let maxItemDiscountPct = 0;
     let gstTotal = 0;
+    let taxableAmountSum = 0;
 
     const items = payload.items.map((item) => {
       const qty = Math.max(0.001, Number(item.quantity) || 1);
@@ -217,15 +257,28 @@ export async function createQuotation(
       const discPct = Math.min(100, Math.max(0, Number(item.discount_pct) || 0));
       const lineGross = rate * qty;
       const discountAmount = Number(((lineGross * discPct) / 100).toFixed(2));
-      const taxable = Number((lineGross - discountAmount).toFixed(2));
+      const netLine = Number((lineGross - discountAmount).toFixed(2));
       const gstRate = item.gst_rate ?? 18;
-      const gstAmt = Number(((taxable * gstRate) / 100).toFixed(2));
-      const total = Number((taxable + gstAmt).toFixed(2));
+
+      let taxable: number;
+      let gstAmt: number;
+      let total: number;
+
+      if (isInclusive) {
+        total = netLine;
+        taxable = gstRate > 0 ? Number((netLine / (1 + gstRate / 100)).toFixed(2)) : netLine;
+        gstAmt = Number((total - taxable).toFixed(2));
+      } else {
+        taxable = netLine;
+        gstAmt = Number(((taxable * gstRate) / 100).toFixed(2));
+        total = Number((taxable + gstAmt).toFixed(2));
+      }
 
       subtotal += lineGross;
       totalDiscount += discountAmount;
       totalCost += (item.purchase_price || 0) * qty;
       gstTotal += gstAmt;
+      taxableAmountSum += taxable;
       if (discPct > maxItemDiscountPct) {
         maxItemDiscountPct = discPct;
       }
@@ -241,7 +294,9 @@ export async function createQuotation(
       };
     });
 
-    const taxableAmount = Math.max(0, Number((subtotal - totalDiscount).toFixed(2)));
+    const taxableAmount = isInclusive
+      ? Number(taxableAmountSum.toFixed(2))
+      : Math.max(0, Number((subtotal - totalDiscount).toFixed(2)));
     const grossProfit = taxableAmount - totalCost;
     const marginPct = taxableAmount > 0 ? Number(((grossProfit / taxableAmount) * 100).toFixed(1)) : 0;
 
@@ -251,7 +306,9 @@ export async function createQuotation(
     const cgstAmount = isTelangana ? Number((gstTotal / 2).toFixed(2)) : 0;
     const sgstAmount = isTelangana ? Number((gstTotal / 2).toFixed(2)) : 0;
     const igstAmount = isTelangana ? 0 : Number(gstTotal.toFixed(2));
-    const grandTotal = Number((taxableAmount + cgstAmount + sgstAmount + igstAmount).toFixed(2));
+    const grandTotal = isInclusive
+      ? Number((subtotal - totalDiscount).toFixed(2))
+      : Number((taxableAmount + cgstAmount + sgstAmount + igstAmount).toFixed(2));
 
     // Evaluate discount approval threshold
     const rule = DISCOUNT_APPROVAL_RULES.find((r) => r.role === userRole) || {
@@ -265,8 +322,10 @@ export async function createQuotation(
     const approverRole = rule.requiresApprovalFrom || 'Managing Director';
 
     // 3. Concurrency-safe atomic Quotation Number generator: ICON/26-27/QT-0001
-    const generatedQuotationNumber =
-      payload.quotation_number?.trim() || (await getNextQuotationNumber());
+    const isAutoNumber = !payload.quotation_number || payload.quotation_number.toLowerCase().includes('auto');
+    const generatedQuotationNumber = !isAutoNumber
+      ? payload.quotation_number!.trim()
+      : await getNextQuotationNumber();
 
     const termsConditions =
       payload.terms_conditions && payload.terms_conditions.length > 0
@@ -289,6 +348,8 @@ export async function createQuotation(
       versions: [],
       quotation_format: payload.quotation_format || 'STANDARD',
       project_sections: payload.project_sections || [],
+      is_gst_inclusive: isInclusive,
+      pricing_mode: isInclusive ? 'INCLUSIVE' : 'EXCLUSIVE',
       quoted_margin_pct: marginPct,
       entity_code: 'ICON_TECH_PRO',
       customer_id: payload.customer_id,
@@ -318,7 +379,7 @@ export async function createQuotation(
       payment_terms: payload.payment_terms || '100% ADVANCE PAYMENT',
       delivery_terms: payload.delivery_terms || 'IMMEDIATELY',
       terms_conditions: termsConditions,
-      bank_details: (await getCompanySettings().catch(() => null))?.bank_details ? {
+      bank_details: payload.bank_details || ((await getCompanySettings().catch(() => null))?.bank_details ? {
         bank_name: (await getCompanySettings().catch(() => null))?.bank_details.bank_name || 'IDBI Bank',
         account_holder: (await getCompanySettings().catch(() => null))?.bank_details.account_name || 'ICON TECH PRO',
         account_number: (await getCompanySettings().catch(() => null))?.bank_details.account_number || '0426653800000161',
@@ -330,7 +391,7 @@ export async function createQuotation(
         account_number: '0426653800000161',
         ifsc_code: 'IBKL0000426',
         branch: 'BANDRI COMPLEX',
-      },
+      }),
       include_signature: payload.include_signature ?? true,
       status: requiresApproval ? 'Approval Pending' : 'Draft',
       notes: payload.notes,
@@ -464,11 +525,21 @@ export async function updateQuotation(
     ]);
     const userRole = authUser.role;
 
+    const store = getStore();
+    const existingIdx = store.findIndex((q) => q.id === id || q.quotation_number === id);
+    const isInclusive = Boolean(
+      payload.is_gst_inclusive !== undefined
+        ? payload.is_gst_inclusive
+        : payload.pricing_mode === 'INCLUSIVE' ||
+          (existingIdx >= 0 && (store[existingIdx].is_gst_inclusive || store[existingIdx].pricing_mode === 'INCLUSIVE'))
+    );
+
     let subtotal = 0;
     let totalDiscount = 0;
     let totalCost = 0;
     let maxItemDiscountPct = 0;
     let gstTotal = 0;
+    let taxableAmountSum = 0;
 
     const items = payload.items.map((item) => {
       const qty = Math.max(0.001, Number(item.quantity) || 1);
@@ -476,15 +547,28 @@ export async function updateQuotation(
       const discPct = Math.min(100, Math.max(0, Number(item.discount_pct) || 0));
       const lineGross = rate * qty;
       const discountAmount = Number(((lineGross * discPct) / 100).toFixed(2));
-      const taxable = Number((lineGross - discountAmount).toFixed(2));
+      const netLine = Number((lineGross - discountAmount).toFixed(2));
       const gstRate = item.gst_rate ?? 18;
-      const gstAmt = Number(((taxable * gstRate) / 100).toFixed(2));
-      const total = Number((taxable + gstAmt).toFixed(2));
+
+      let taxable: number;
+      let gstAmt: number;
+      let total: number;
+
+      if (isInclusive) {
+        total = netLine;
+        taxable = gstRate > 0 ? Number((netLine / (1 + gstRate / 100)).toFixed(2)) : netLine;
+        gstAmt = Number((total - taxable).toFixed(2));
+      } else {
+        taxable = netLine;
+        gstAmt = Number(((taxable * gstRate) / 100).toFixed(2));
+        total = Number((taxable + gstAmt).toFixed(2));
+      }
 
       subtotal += lineGross;
       totalDiscount += discountAmount;
       totalCost += (item.purchase_price || 0) * qty;
       gstTotal += gstAmt;
+      taxableAmountSum += taxable;
       if (discPct > maxItemDiscountPct) {
         maxItemDiscountPct = discPct;
       }
@@ -500,7 +584,9 @@ export async function updateQuotation(
       };
     });
 
-    const taxableAmount = Math.max(0, Number((subtotal - totalDiscount).toFixed(2)));
+    const taxableAmount = isInclusive
+      ? Number(taxableAmountSum.toFixed(2))
+      : Math.max(0, Number((subtotal - totalDiscount).toFixed(2)));
     const grossProfit = taxableAmount - totalCost;
     const marginPct = taxableAmount > 0 ? Number(((grossProfit / taxableAmount) * 100).toFixed(1)) : 0;
 
@@ -509,7 +595,9 @@ export async function updateQuotation(
     const cgstAmount = isTelangana ? Number((gstTotal / 2).toFixed(2)) : 0;
     const sgstAmount = isTelangana ? Number((gstTotal / 2).toFixed(2)) : 0;
     const igstAmount = isTelangana ? 0 : Number(gstTotal.toFixed(2));
-    const grandTotal = Number((taxableAmount + cgstAmount + sgstAmount + igstAmount).toFixed(2));
+    const grandTotal = isInclusive
+      ? Number((subtotal - totalDiscount).toFixed(2))
+      : Number((taxableAmount + cgstAmount + sgstAmount + igstAmount).toFixed(2));
 
     const rule = DISCOUNT_APPROVAL_RULES.find((r) => r.role === userRole) || {
       role: userRole,
@@ -520,8 +608,6 @@ export async function updateQuotation(
     const requiresApproval = overallDiscountPct > rule.maxDiscountPct;
     const approverRole = rule.requiresApprovalFrom || 'Managing Director';
 
-    const store = getStore();
-    const existingIdx = store.findIndex((q) => q.id === id || q.quotation_number === id);
     const currentRev = existingIdx >= 0 ? (store[existingIdx].revision_number || 1) + 1 : 2;
 
     const termsConditions =
@@ -556,6 +642,8 @@ export async function updateQuotation(
       dispatch_from:
         payload.dispatch_from ||
         '7-1-62/A, FLAT NO-503, 5 TH FLOOR, AMEER ESTATE, SANJEEVA REDDY NAGAR, Hyderabad, TELANGANA, 500038',
+      is_gst_inclusive: isInclusive,
+      pricing_mode: isInclusive ? 'INCLUSIVE' : 'EXCLUSIVE',
       items,
       subtotal,
       total_discount: totalDiscount,
@@ -569,7 +657,7 @@ export async function updateQuotation(
       payment_terms: payload.payment_terms || termsConditions[0] || '100% ADVANCE PAYMENT',
       delivery_terms: payload.delivery_terms || termsConditions[2] || 'IMMEDIATELY',
       terms_conditions: termsConditions,
-      bank_details: (existingIdx >= 0 && store[existingIdx].bank_details) || {
+      bank_details: payload.bank_details || (existingIdx >= 0 && store[existingIdx].bank_details) || {
         bank_name: 'IDBI Bank',
         account_holder: 'ICON TECH PRO',
         account_number: '0426653800000161',
@@ -600,34 +688,64 @@ export async function updateQuotation(
           revision_number: currentRev,
         });
 
-        await admin
-          .from('quotations')
-          .update({
-            quotation_number: updatedQuote.quotation_number,
-            customer_name: payload.customer_name,
-            company_name: payload.company_name || null,
-            customer_type: payload.customer_type,
-            phone: payload.phone,
-            email: payload.email || null,
-            address: payload.address || null,
-            salesperson_name: updatedQuote.salesperson_name,
-            quotation_date: payload.quotation_date,
-            validity_days: payload.validity_days,
-            subtotal,
-            total_discount: totalDiscount,
-            taxable_amount: taxableAmount,
-            cgst_amount: cgstAmount,
-            sgst_amount: sgstAmount,
-            igst_amount: igstAmount,
-            grand_total: grandTotal,
-            total_cost: totalCost,
-            margin_pct: marginPct,
-            payment_terms: updatedQuote.payment_terms,
-            delivery_terms: updatedQuote.delivery_terms,
-            notes: serializedMeta,
-            status: updatedQuote.status,
-          })
-          .or(`id.eq.${id},quotation_number.eq.${id}`);
+        const targetDbId = isUuid(existingIdx >= 0 ? store[existingIdx].id : id)
+          ? (existingIdx >= 0 ? store[existingIdx].id : id)
+          : (await findQuotationRecord(id))?.id;
+
+        if (targetDbId) {
+          await admin
+            .from('quotations')
+            .update({
+              quotation_number: updatedQuote.quotation_number,
+              customer_name: payload.customer_name,
+              company_name: payload.company_name || null,
+              customer_type: payload.customer_type,
+              phone: payload.phone,
+              email: payload.email || null,
+              address: payload.address || null,
+              salesperson_name: updatedQuote.salesperson_name,
+              quotation_date: payload.quotation_date,
+              validity_days: payload.validity_days,
+              subtotal,
+              total_discount: totalDiscount,
+              taxable_amount: taxableAmount,
+              cgst_amount: cgstAmount,
+              sgst_amount: sgstAmount,
+              igst_amount: igstAmount,
+              grand_total: grandTotal,
+              total_cost: totalCost,
+              margin_pct: marginPct,
+              payment_terms: updatedQuote.payment_terms,
+              delivery_terms: updatedQuote.delivery_terms,
+              notes: serializedMeta,
+              status: updatedQuote.status,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', targetDbId);
+
+          await admin.from('quotation_items').delete().eq('quotation_id', targetDbId);
+          if (items.length > 0) {
+            await admin.from('quotation_items').insert(
+              items.map((it) => ({
+                quotation_id: targetDbId,
+                product_id: sanitizeUuid(it.product_id),
+                product_name: it.product_name,
+                sku: it.sku || null,
+                category: it.category || null,
+                unit: it.unit || 'Nos.',
+                quantity: it.quantity,
+                purchase_price: it.purchase_price,
+                selling_price: it.selling_price,
+                discount_pct: it.discount_pct,
+                discount_amount: it.discount_amount,
+                gst_rate: it.gst_rate,
+                hsn_sac: it.hsn_sac || '8471',
+                total_amount: it.total_amount,
+              }))
+            );
+          }
+          updatedQuote.id = targetDbId;
+        }
       } catch (err) {
         console.warn('Supabase update quotation fallback:', err);
       }
@@ -673,7 +791,10 @@ export async function updateQuotationStatus(
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin.from('quotations').update({ status }).or(`id.eq.${id},quotation_number.eq.${id}`);
+        const dbQuote = await findQuotationRecord(id);
+        if (dbQuote) {
+          await admin.from('quotations').update({ status, updated_at: new Date().toISOString() }).eq('id', dbQuote.id);
+        }
       } catch {}
     }
 
@@ -705,8 +826,8 @@ export async function convertQuotationToOrder(
 
     const store = getStore();
 
-    // 1. Authoritative lookup in dynamic store
-    const quote = store.find((q) => q.id === quotationId || q.quotation_number === quotationId);
+    // 1. Authoritative lookup in DB or store
+    const quote = await findQuotationRecord(quotationId);
     if (!quote) {
       return { success: false, error: `Quotation ${quotationId} not found in active records.` };
     }
@@ -728,7 +849,7 @@ export async function convertQuotationToOrder(
       company_name: quote.company_name,
       salesperson_name: quote.salesperson_name,
       place_of_supply: quote.place_of_supply || '36-TELANGANA',
-      items: quote.items.map((it) => ({
+      items: (quote.items || []).map((it) => ({
         product_id: it.product_id,
         sku: it.sku,
         product_name: it.product_name,
@@ -746,17 +867,20 @@ export async function convertQuotationToOrder(
 
     const newOrder = orderResult.data;
 
-    // 4. Update quotation state
-    quote.status = 'Accepted';
-    quote.order_id = newOrder.order_number;
+    // 4. Update quotation state in store & DB
+    const memQuote = store.find((q) => q.id === quote.id || q.quotation_number === quote.quotation_number);
+    if (memQuote) {
+      memQuote.status = 'Accepted';
+      memQuote.order_id = newOrder.order_number;
+    }
 
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
         await admin
           .from('quotations')
-          .update({ status: 'Accepted', order_id: newOrder.order_number })
-          .or(`id.eq.${quotationId},quotation_number.eq.${quotationId}`);
+          .update({ status: 'Accepted', order_id: sanitizeUuid(newOrder.id), updated_at: new Date().toISOString() })
+          .eq('id', quote.id);
       } catch (dbErr) {
         console.warn('Supabase quotation update failed:', dbErr);
       }
@@ -796,7 +920,7 @@ export async function reviseQuotation(
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
     const store = getStore();
 
-    const quote = store.find((q) => q.id === quotationId || q.quotation_number === quotationId);
+    const quote = await findQuotationRecord(quotationId);
     if (!quote) {
       return { success: false, error: 'Quotation not found' };
     }
@@ -985,17 +1109,23 @@ export async function createQuotationRevision(
 }
 
 export async function getQuotationRevisions(quotationId: string): Promise<QuotationRevision[]> {
+  await requireAuth();
   const store = getRevisionsStore();
   if (await isSupabaseAvailable()) {
     try {
-      const supabase = await createClient();
-      const { data, error } = await supabase
+      const admin = createAdminClient();
+      const quote = await findQuotationRecord(quotationId);
+      const targetId = quote?.id || (isUuid(quotationId) ? quotationId : null);
+      if (!targetId) {
+        return [];
+      }
+      const { data, error } = await admin
         .from('quotation_revisions')
         .select('*')
-        .eq('quotation_id', quotationId)
+        .eq('quotation_id', targetId)
         .order('revision_number', { ascending: false });
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data as QuotationRevision[];
       }
     } catch (err) {
@@ -1017,7 +1147,7 @@ export async function approveQuotation(
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM']);
     const store = getStore();
 
-    const quote = store.find((q) => q.id === quotationId || q.quotation_number === quotationId);
+    const quote = await findQuotationRecord(quotationId);
     if (!quote) {
       return { success: false, error: 'Quotation not found' };
     }
@@ -1030,16 +1160,24 @@ export async function approveQuotation(
       };
     }
 
+    const nowIso = new Date().toISOString();
     quote.status = 'Approved';
     quote.approved_margin_pct = quote.margin_pct;
+    quote.approved_by = authUser.name;
+    quote.approved_at = nowIso;
 
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
         await admin
           .from('quotations')
-          .update({ status: 'Approved' })
-          .or(`id.eq.${quotationId},quotation_number.eq.${quotationId}`);
+          .update({
+            status: 'Approved',
+            approved_margin_pct: quote.margin_pct,
+            approved_by: authUser.name,
+            approved_at: nowIso,
+          })
+          .eq('id', quote.id);
       } catch (err) {
         console.warn('Supabase approveQuotation fallback:', err);
       }
@@ -1075,8 +1213,7 @@ export async function recordQuotationPreview(
       'Accounts',
       'Office Assistant',
     ]);
-    const store = getStore();
-    const quote = store.find((q) => q.id === quotationId || q.quotation_number === quotationId);
+    const quote = await findQuotationRecord(quotationId);
     if (!quote) {
       return { success: false, error: 'Quotation not found' };
     }
@@ -1084,6 +1221,11 @@ export async function recordQuotationPreview(
     const timestamp = new Date().toISOString();
     quote.previewed_by = authUser.name;
     quote.previewed_at = timestamp;
+    const memQuotePreview = getStore().find((q) => q.id === quote.id || q.quotation_number === quote.quotation_number);
+    if (memQuotePreview) {
+      memQuotePreview.previewed_by = authUser.name;
+      memQuotePreview.previewed_at = timestamp;
+    }
 
     await logAuditEvent({
       userName: authUser.name,
@@ -1111,8 +1253,7 @@ export async function verifyAndApproveQuotation(
 ): Promise<{ success: boolean; quotation?: Quotation; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
-    const store = getStore();
-    const quote = store.find((q) => q.id === quotationId || q.quotation_number === quotationId);
+    const quote = await findQuotationRecord(quotationId);
     if (!quote) {
       return { success: false, error: 'Quotation not found' };
     }
@@ -1135,13 +1276,20 @@ export async function verifyAndApproveQuotation(
       quote.notes = (quote.notes ? quote.notes + '\n' : '') + `[Verification Approval]: ${payload.notes} by ${authUser.name}`;
     }
 
+    const memVerify = getStore().find((q) => q.id === quote.id || q.quotation_number === quote.quotation_number);
+    if (memVerify) {
+      memVerify.approved_by = authUser.name;
+      memVerify.approved_at = now;
+      memVerify.status = 'Approved';
+    }
+
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
         await admin
           .from('quotations')
-          .update({ status: 'Approved' })
-          .or(`id.eq.${quotationId},quotation_number.eq.${quotationId}`);
+          .update({ status: 'Approved', approved_by: authUser.name, approved_at: now })
+          .eq('id', quote.id);
       } catch (err) {
         console.warn('Supabase verifyAndApproveQuotation fallback:', err);
       }
@@ -1171,8 +1319,7 @@ export async function recordQuotationSent(
 ): Promise<{ success: boolean; quotation?: Quotation; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
-    const store = getStore();
-    const quote = store.find((q) => q.id === quotationId || q.quotation_number === quotationId);
+    const quote = await findQuotationRecord(quotationId);
     if (!quote) {
       return { success: false, error: 'Quotation not found' };
     }
@@ -1190,13 +1337,21 @@ export async function recordQuotationSent(
     quote.send_channel = payload.channel;
     quote.status = 'Sent';
 
+    const memSent = getStore().find((q) => q.id === quote.id || q.quotation_number === quote.quotation_number);
+    if (memSent) {
+      memSent.sent_by = authUser.name;
+      memSent.sent_at = now;
+      memSent.send_channel = payload.channel;
+      memSent.status = 'Sent';
+    }
+
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
         await admin
           .from('quotations')
-          .update({ status: 'Sent' })
-          .or(`id.eq.${quotationId},quotation_number.eq.${quotationId}`);
+          .update({ status: 'Sent', updated_at: now })
+          .eq('id', quote.id);
       } catch (err) {
         console.warn('Supabase recordQuotationSent fallback:', err);
       }
@@ -1208,6 +1363,27 @@ export async function recordQuotationSent(
       module: 'COMMUNICATIONS',
       details: `Dispatched quotation ${quote.quotation_number} via ${payload.channel} to ${payload.recipient}`,
     });
+
+    // Auto-enqueue formal quotation email dispatch
+    if (payload.channel === 'EMAIL' && payload.recipient) {
+      try {
+        const { enqueueAutomatedEmail, processEmailQueue } = await import('@/lib/actions/email-automation');
+        await enqueueAutomatedEmail({
+          trigger_type: 'QUOTATION_PDF',
+          recipient_type: 'CUSTOMER',
+          recipient_email: payload.recipient,
+          recipient_name: quote.customer_name,
+          entity_type: 'QUOTATION',
+          entity_id: quote.id,
+          entity_number: quote.quotation_number,
+          custom_subject: `Official Commercial Proposal ${quote.quotation_number} - ICON TECH PRO`,
+          custom_body: `<p>Dear ${quote.customer_name},</p><p>Please find attached our official commercial proposal <strong>${quote.quotation_number}</strong> for your review.</p><p>Proposal Value: <strong>₹${Number(quote.grand_total).toLocaleString('en-IN')}</strong></p><p>Regards,<br><strong>ICON TECH PRO Enterprise Team</strong><br>Hyderabad, Telangana</p>`,
+        });
+        processEmailQueue().catch(() => {});
+      } catch (emErr) {
+        console.warn('Quotation automated email trigger warning:', emErr);
+      }
+    }
 
     revalidatePath('/dashboard/quotations');
     revalidatePath('/dashboard/communication');
@@ -1283,52 +1459,56 @@ export async function cloneQuotation(
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin.from('quotations').insert({
-          id: clonedQuotation.id,
-          quotation_number: clonedQuotation.quotation_number,
-          customer_id: clonedQuotation.customer_id,
-          customer_name: clonedQuotation.customer_name,
-          company_name: clonedQuotation.company_name,
-          customer_type: clonedQuotation.customer_type,
-          phone: clonedQuotation.phone,
-          email: clonedQuotation.email,
-          address: clonedQuotation.address,
-          salesperson_name: clonedQuotation.salesperson_name,
-          quotation_date: clonedQuotation.quotation_date,
-          validity_days: clonedQuotation.validity_days,
-          place_of_supply: clonedQuotation.place_of_supply,
-          dispatch_from: clonedQuotation.dispatch_from,
-          subtotal: clonedQuotation.subtotal,
-          total_discount: clonedQuotation.total_discount,
-          taxable_amount: clonedQuotation.taxable_amount,
-          cgst_amount: clonedQuotation.cgst_amount,
-          sgst_amount: clonedQuotation.sgst_amount,
-          igst_amount: clonedQuotation.igst_amount,
-          grand_total: clonedQuotation.grand_total,
-          total_cost: clonedQuotation.total_cost,
-          margin_pct: clonedQuotation.margin_pct,
-          status: 'Draft',
-          notes: clonedQuotation.notes,
-        });
+        const { data: insertedClone, error: cloneErr } = await admin
+          .from('quotations')
+          .insert({
+            quotation_number: clonedQuotation.quotation_number,
+            customer_id: sanitizeUuid(clonedQuotation.customer_id),
+            customer_name: clonedQuotation.customer_name,
+            company_name: clonedQuotation.company_name || null,
+            customer_type: clonedQuotation.customer_type,
+            phone: clonedQuotation.phone,
+            email: clonedQuotation.email || null,
+            address: clonedQuotation.address || null,
+            salesperson_name: clonedQuotation.salesperson_name,
+            quotation_date: clonedQuotation.quotation_date,
+            validity_days: clonedQuotation.validity_days,
+            subtotal: clonedQuotation.subtotal,
+            total_discount: clonedQuotation.total_discount,
+            taxable_amount: clonedQuotation.taxable_amount,
+            cgst_amount: clonedQuotation.cgst_amount,
+            sgst_amount: clonedQuotation.sgst_amount,
+            igst_amount: clonedQuotation.igst_amount,
+            grand_total: clonedQuotation.grand_total,
+            total_cost: clonedQuotation.total_cost,
+            margin_pct: clonedQuotation.margin_pct,
+            status: 'Draft',
+            notes: clonedQuotation.notes,
+          })
+          .select('id')
+          .single();
 
-        if (clonedItems.length > 0) {
-          const itemsPayload = clonedItems.map((it) => ({
-            quotation_id: clonedQuotation.id,
-            product_name: it.product_name,
-            sku: it.sku,
-            category: it.category,
-            unit: it.unit,
-            quantity: it.quantity,
-            purchase_price: it.purchase_price,
-            selling_price: it.selling_price,
-            discount_pct: it.discount_pct,
-            discount_amount: it.discount_amount,
-            gst_rate: it.gst_rate,
-            hsn_sac: it.hsn_sac,
-            total_amount: it.total_amount,
-            is_custom: it.is_custom,
-          }));
-          await admin.from('quotation_items').insert(itemsPayload);
+        if (!cloneErr && insertedClone?.id) {
+          clonedQuotation.id = insertedClone.id;
+          if (clonedItems.length > 0) {
+            const itemsPayload = clonedItems.map((it) => ({
+              quotation_id: insertedClone.id,
+              product_id: sanitizeUuid(it.product_id),
+              product_name: it.product_name,
+              sku: it.sku || null,
+              category: it.category || null,
+              unit: it.unit || 'Nos.',
+              quantity: it.quantity,
+              purchase_price: it.purchase_price,
+              selling_price: it.selling_price,
+              discount_pct: it.discount_pct,
+              discount_amount: it.discount_amount,
+              gst_rate: it.gst_rate,
+              hsn_sac: it.hsn_sac || '8471',
+              total_amount: it.total_amount,
+            }));
+            await admin.from('quotation_items').insert(itemsPayload);
+          }
         }
       } catch (dbErr) {
         console.warn('Supabase DB cloneQuotation fallback:', dbErr);
@@ -1374,7 +1554,7 @@ export async function compareQuotationRevisions(
   try {
     await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
     const revStore = getRevisionsStore();
-    const quote = getStore().find((q) => q.id === quotationId || q.quotation_number === quotationId);
+    const quote = await findQuotationRecord(quotationId);
     if (!quote) {
       return { success: false, error: 'Quotation not found' };
     }
@@ -1421,7 +1601,7 @@ export async function analyzeQuotationPricingAction(
 ): Promise<{ success: boolean; pricing?: QuotationPricingResult; analysis?: MarginHealthAnalysis; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
-    const quote = getStore().find((q) => q.id === quotationId || q.quotation_number === quotationId);
+    const quote = await findQuotationRecord(quotationId);
     if (!quote) {
       return { success: false, error: `Quotation ${quotationId} not found.` };
     }
@@ -1471,7 +1651,7 @@ export async function requestDiscountApprovalAction(
 ): Promise<{ success: boolean; request?: DiscountApprovalRequest; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
-    const quote = getStore().find((q) => q.id === quotationId || q.quotation_number === quotationId);
+    const quote = await findQuotationRecord(quotationId);
     if (!quote) {
       return { success: false, error: 'Quotation not found' };
     }
@@ -1498,8 +1678,27 @@ export async function requestDiscountApprovalAction(
 
     const store = getDiscountApprovalsStore();
     store.unshift(approvalReq);
-
     quote.status = 'Approval Pending';
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        await admin.from('quotations').update({ status: 'Approval Pending' }).eq('id', quote.id);
+        try {
+          await admin.from('discount_approval_requests').insert({
+            id: approvalReq.id,
+            quotation_id: sanitizeUuid(quote.id),
+            quotation_number: quote.quotation_number,
+            requested_by_name: authUser.name,
+            role_name: authUser.role,
+            discount_percent: discountPercent,
+            required_approver_role: requiredApprover,
+            status: 'PENDING',
+            remarks,
+          });
+        } catch {}
+      } catch {}
+    }
 
     await logAuditEvent({
       userName: authUser.name,
@@ -1543,11 +1742,15 @@ export async function approveDiscountAction(
     if (comments) req.remarks = `${req.remarks || ''} [Approved: ${comments}]`;
 
     // Update quotation status
-    const quote = getStore().find((q) => q.id === req.quotation_id || q.quotation_number === req.quotation_number);
+    const quote = await findQuotationRecord(req.quotation_id || req.quotation_number);
     if (quote) {
       quote.status = 'Approved';
       quote.approved_by = authUser.name;
       quote.approved_at = new Date().toISOString();
+      if (await isSupabaseAvailable()) {
+        const admin = createAdminClient();
+        await admin.from('quotations').update({ status: 'Approved', approved_by: authUser.name, approved_at: quote.approved_at }).eq('id', quote.id);
+      }
     }
 
     await logAuditEvent({
@@ -1582,9 +1785,13 @@ export async function rejectDiscountAction(
     req.status = 'REJECTED';
     req.remarks = `${req.remarks || ''} [Rejected by ${authUser.name}: ${reason}]`;
 
-    const quote = getStore().find((q) => q.id === req.quotation_id || q.quotation_number === req.quotation_number);
+    const quote = await findQuotationRecord(req.quotation_id || req.quotation_number);
     if (quote) {
       quote.status = 'Draft'; // Revert to draft for price adjustment
+      if (await isSupabaseAvailable()) {
+        const admin = createAdminClient();
+        await admin.from('quotations').update({ status: 'Draft' }).eq('id', quote.id);
+      }
     }
 
     await logAuditEvent({

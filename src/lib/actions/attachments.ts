@@ -1,7 +1,6 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { getAuthenticatedUser } from '@/lib/auth/session';
@@ -110,15 +109,15 @@ export async function getAttachments(
 
   if (await isSupabaseAvailable()) {
     try {
-      const supabase = await createClient();
-      const { data, error } = await supabase
+      const admin = createAdminClient();
+      const { data, error } = await admin
         .from('record_attachments')
         .select('*')
         .eq('entity_type', entity_type)
         .eq('entity_id', entity_id)
         .order('created_at', { ascending: false });
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data as RecordAttachment[];
       }
     } catch (err) {

@@ -7,6 +7,7 @@ import { getQuotations } from '@/lib/actions/quotations';
 import { getOrders } from '@/lib/actions/orders';
 import { getInvoices } from '@/lib/actions/billing';
 import { getProducts } from '@/lib/actions/products';
+import { getProjects } from '@/lib/actions/projects';
 import { getPurchaseOrders } from '@/lib/actions/procurement';
 import { getInstallations, getSiteVisits, getDispatches } from '@/lib/actions/operations';
 import { getEnquiries } from '@/lib/actions/enquiries';
@@ -21,6 +22,7 @@ import { getCreditNotes, getDebitNotes } from '@/lib/actions/finance';
 import { getTallyReconciliationItems } from '@/lib/actions/tally-reconciliation';
 import { getBusinessRisks } from '@/lib/actions/risk-engine';
 import { getCustomerOpportunities } from '@/lib/actions/opportunities';
+import type { ERPTask, ApprovalRequest, SerialRecord } from '@/types/erp';
 
 export interface SearchResultItem {
   id: string;
@@ -30,6 +32,7 @@ export interface SearchResultItem {
     | 'Site Visit'
     | 'Quotation'
     | 'Sales Order'
+    | 'Project'
     | 'Purchase Order'
     | 'Invoice'
     | 'Payment'
@@ -80,80 +83,76 @@ export async function globalSearch(
   const lower = query.toLowerCase();
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // Load all datasets concurrently
+  // 1. Core 7 Entities: Always load targeted subsets based on user query
   const [
     custRes,
+    enqRes,
     quoteRes,
     orderRes,
     invRes,
     prodRes,
-    poRes,
-    instRes,
-    serialRes,
-    commRes,
-    ticketRes,
-    amcRes,
-    taskRes,
-    apprRes,
-    sinvRes,
-    tallyRes,
-    cnRes,
-    dnRes,
-    reconRes,
-    riskRes,
-    oppRes,
-    enqRes,
-    visitsRes,
-    dispatchRes,
+    prjRes,
   ] = await Promise.all([
-    getCustomers({ limit: 100 }),
-    getQuotations(),
-    getOrders(),
-    getInvoices(),
-    getProducts(),
-    getPurchaseOrders(),
-    getInstallations(),
-    getSerialRecords(),
-    getOutboxMessages(),
-    getServiceTickets(),
-    getAMCContracts(),
-    getTasks(),
-    getApprovalRequests(),
-    getSupplierInvoices(),
-    getTallySyncQueue(),
-    getCreditNotes(),
-    getDebitNotes(),
-    getTallyReconciliationItems(),
-    getBusinessRisks(),
-    getCustomerOpportunities(),
-    getEnquiries(),
-    getSiteVisits(),
-    getDispatches(),
+    getCustomers({ search: query, limit: 15 }).catch(() => ({ customers: [], total: 0 })),
+    getEnquiries({ search: query }).catch(() => ({ enquiries: [], total: 0 })),
+    getQuotations({ search: query }).catch(() => ({ quotations: [], total: 0 })),
+    getOrders({ search: query }).catch(() => ({ orders: [], total: 0 })),
+    getInvoices({ search: query }).catch(() => ({ invoices: [], total: 0 })),
+    getProducts({ search: query }).catch(() => ({ products: [], total: 0 })),
+    getProjects().catch(() => ({ projects: [] })),
   ]);
 
   const customers = custRes.customers || [];
+  const enquiries = enqRes.enquiries || [];
   const quotations = quoteRes.quotations || [];
   const orders = orderRes.orders || [];
   const invoices = invRes.invoices || [];
   const products = prodRes.products || [];
-  const purchaseOrders = Array.isArray(poRes) ? poRes : [];
-  const installations = instRes || [];
-  const serials = (serialRes && Array.isArray(serialRes.records)) ? serialRes.records : [];
-  const communications = commRes || [];
-  const tickets = ticketRes || [];
-  const amcContracts = amcRes || [];
-  const tasks = taskRes?.tasks || [];
-  const approvals = apprRes?.requests || [];
-  const supplierInvoices = sinvRes?.invoices || [];
-  const tallyQueue = tallyRes?.queue || [];
-  const creditNotes = cnRes || [];
-  const debitNotes = dnRes || [];
-  const reconItems = reconRes?.data || [];
-  const riskAlerts = riskRes?.data || [];
-  const opportunities = oppRes?.data || [];
-  const enquiries = enqRes?.enquiries || [];
-  const siteVisits = visitsRes || [];
-  const dispatches = dispatchRes || [];
+  const projects = Array.isArray(prjRes) ? prjRes : (prjRes?.projects || []);
+
+  // 2. Specialized Entities: Load ONLY if natural language intent or query mentions them
+  const needsApprovals = /approval|discount|request/i.test(lower);
+  const needsSupplier = /supplier|purchase|po\b|vendor|grn/i.test(lower);
+  const needsInstallation = /install|job\s*card/i.test(lower);
+  const needsWarranty = /warranty|serial/i.test(lower);
+  const needsAMC = /amc|maintenance|contract/i.test(lower);
+  const needsTasks = /task|todo|follow/i.test(lower);
+
+  const [
+    apprRes,
+    poRes,
+    sinvRes,
+    instRes,
+    serialRes,
+    amcRes,
+    taskRes,
+  ] = await Promise.all([
+    needsApprovals ? getApprovalRequests().catch(() => ({ requests: [] })) : Promise.resolve({ requests: [] }),
+    needsSupplier ? getPurchaseOrders().catch(() => []) : Promise.resolve([]),
+    needsSupplier ? getSupplierInvoices().catch(() => ({ invoices: [] })) : Promise.resolve({ invoices: [] }),
+    needsInstallation ? getInstallations().catch(() => []) : Promise.resolve([]),
+    needsWarranty ? getSerialRecords().catch(() => ({ records: [] })) : Promise.resolve({ records: [] }),
+    needsAMC ? getAMCContracts().catch(() => []) : Promise.resolve([]),
+    needsTasks ? getTasks().catch(() => ({ tasks: [] })) : Promise.resolve({ tasks: [] }),
+  ]);
+
+  const purchaseOrders: any[] = Array.isArray(poRes) ? poRes : [];
+  const installations: any[] = instRes || [];
+  const serials: SerialRecord[] = (serialRes && Array.isArray((serialRes as any).records)) ? (serialRes as any).records : [];
+  const amcContracts: any[] = amcRes || [];
+  const tasks: ERPTask[] = (taskRes as any)?.tasks || [];
+  const approvals: ApprovalRequest[] = (apprRes as any)?.requests || [];
+  const supplierInvoices: Array<{ id: string; invoice_number: string; supplier_name: string; total_amount: number; po_number: string; match_status: string }> = (sinvRes as any)?.invoices || [];
+  const communications: any[] = [];
+  const tickets: any[] = [];
+  const tallyQueue: any[] = [];
+  const creditNotes: any[] = [];
+  const debitNotes: any[] = [];
+  const reconItems: any[] = [];
+  const riskAlerts: any[] = [];
+  const opportunities: any[] = [];
+  const siteVisits: any[] = [];
+  const dispatches: any[] = [];
 
   const results: SearchResultItem[] = [];
   let interpretedIntent: string | undefined = undefined;
@@ -553,6 +552,27 @@ export async function globalSearch(
           subtitle: `SKU: ${p.sku} • Price: ₹${p.selling_price.toLocaleString('en-IN')}${costSnippet} • Stock: ${p.current_stock}`,
           badge: p.category_name,
           href: '/dashboard/products',
+        });
+      });
+  }
+
+  // Search Projects
+  if (categoryFilter === 'ALL' || categoryFilter === 'Project') {
+    projects
+      .filter((prj) =>
+        (prj.project_number && prj.project_number.toLowerCase().includes(lower)) ||
+        (prj.project_name && prj.project_name.toLowerCase().includes(lower)) ||
+        (prj.customer_name && prj.customer_name.toLowerCase().includes(lower))
+      )
+      .slice(0, 5)
+      .forEach((prj) => {
+        results.push({
+          id: `prj-${prj.id}`,
+          category: 'Project',
+          title: `${prj.project_number || prj.id}: ${prj.project_name}`,
+          subtitle: `Customer: ${prj.customer_name} • Value: ₹${(prj.total_project_value || 0).toLocaleString('en-IN')} • Status: ${prj.status}`,
+          badge: prj.status,
+          href: `/dashboard/projects?search=${prj.project_number || prj.id}`,
         });
       });
   }

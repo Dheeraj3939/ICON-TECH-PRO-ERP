@@ -2,6 +2,7 @@ export type BusinessEntityCode = 'ICON_TECH_PRO';
 
 export type UserRoleName =
   | 'Managing Director'
+  | 'Admin'
   | 'Admin / BDM'
   | 'BDM'
   | 'Sales Executive'

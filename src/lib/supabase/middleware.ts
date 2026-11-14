@@ -93,6 +93,7 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/customers') ||
     request.nextUrl.pathname.startsWith('/settings');
 
+
   // If unauthenticated user tries to access protected dashboard route, redirect to /login
   if (!isAuth && isDashboardRoute) {
     const url = request.nextUrl.clone();

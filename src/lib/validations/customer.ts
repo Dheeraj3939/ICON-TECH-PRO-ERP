@@ -1,9 +1,20 @@
 import { z } from 'zod';
+import { ENQUIRY_SOURCES, isCanonicalEnquirySource } from '@/lib/constants/customer-source';
 
 export const indianPhoneRegex = /^[6-9]\d{9}$/;
 export const gstinRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 export const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
 export const pincodeRegex = /^[1-9][0-9]{5}$/;
+
+export const enquirySourceSchema = z
+  .string()
+  .trim()
+  .min(1, 'Source is required')
+  .refine(
+    (val) => isCanonicalEnquirySource(val) || val.length > 0,
+    { message: 'Invalid enquiry source' }
+  )
+  .default('Walk-in');
 
 export const customerSchema = z.discriminatedUnion('customer_type', [
   // 1. Company (B2B) Customer Schema
@@ -19,7 +30,7 @@ export const customerSchema = z.discriminatedUnion('customer_type', [
       .trim()
       .min(2, 'Contact person name must be at least 2 characters')
       .max(120, 'Contact person name too long'),
-    designation: z.string().trim().max(100).optional().or(z.literal('')),
+    designation: z.string().trim().min(1, 'Designation is required for company accounts').max(100),
     phone: z
       .string()
       .trim()
@@ -35,9 +46,7 @@ export const customerSchema = z.discriminatedUnion('customer_type', [
     email: z
       .string()
       .trim()
-      .email('Enter a valid email address')
-      .optional()
-      .or(z.literal('')),
+      .email('Enter a valid corporate email address (required for company accounts)'),
     billing_address: z
       .string()
       .trim()
@@ -73,10 +82,13 @@ export const customerSchema = z.discriminatedUnion('customer_type', [
       .optional()
       .or(z.literal('')),
     credit_limit: z.coerce.number().min(0).default(0),
-    enquiry_source: z.string().trim().min(1, 'Source is required').default('Walk-in'),
+    enquiry_source: enquirySourceSchema,
     salesperson_id: z.string().uuid('Select a valid salesperson').optional().or(z.literal('')),
     status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).default('ACTIVE'),
     notes: z.string().trim().optional().or(z.literal('')),
+    contacts: z.array(z.any()).optional(),
+    shipping_addresses: z.array(z.any()).optional(),
+    internal_notes: z.any().optional(),
   }),
 
   // 2. Individual (B2C) Customer Schema
@@ -140,7 +152,7 @@ export const customerSchema = z.discriminatedUnion('customer_type', [
       .optional()
       .or(z.literal('')),
     credit_limit: z.coerce.number().min(0).default(0),
-    enquiry_source: z.string().trim().min(1, 'Source is required').default('Walk-in'),
+    enquiry_source: enquirySourceSchema,
     salesperson_id: z.string().optional().or(z.literal('')),
     status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).default('ACTIVE'),
     notes: z.string().trim().optional().or(z.literal('')),
@@ -220,7 +232,7 @@ export const customerSchema = z.discriminatedUnion('customer_type', [
       .optional()
       .or(z.literal('')),
     credit_limit: z.coerce.number().min(0).default(0),
-    enquiry_source: z.string().trim().min(1, 'Source is required').default('GeM Portal'),
+    enquiry_source: enquirySourceSchema,
     salesperson_id: z.string().optional().or(z.literal('')),
     status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).default('ACTIVE'),
     notes: z.string().trim().optional().or(z.literal('')),

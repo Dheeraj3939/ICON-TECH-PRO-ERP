@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifyOAuthState } from '@/lib/integrations/gmail-crypto';
 import { getGmailOAuthCredentials } from '@/lib/integrations/gmail-env';
-import { saveGmailOAuthTokens } from '@/lib/actions/gmail';
+import { saveGmailOAuthTokens } from '@/lib/integrations/gmail-token';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 
@@ -13,7 +13,28 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get('state');
   const errorParam = searchParams.get('error');
 
-  const baseRedirectUrl = new URL('/dashboard/settings/integrations', request.url);
+  // 0. Resolve credentials and safely determine browser redirect origin from configured redirectUri
+  const { clientId, clientSecret, redirectUri: envRedirectUri, hasClientId, hasClientSecret } = getGmailOAuthCredentials();
+
+  const forwardedHost = (request.headers.get('x-forwarded-host') || request.headers.get('host') || '').split(',')[0].trim();
+  const isKnownCloudHost = /^(uat\.icontechpro\.in|erp\.icontechpro\.in|icon-erp-uat-web-production\.up\.railway\.app)$/i.test(forwardedHost);
+  const redirectUri = isKnownCloudHost
+    ? `https://${forwardedHost}/api/integrations/gmail/callback`
+    : envRedirectUri;
+
+  let redirectOrigin: string;
+  try {
+    const parsedRedirect = new URL(redirectUri);
+    redirectOrigin = parsedRedirect.origin;
+  } catch {
+    redirectOrigin = process.env.NEXT_PUBLIC_SITE_URL || 'https://erp.icontechpro.in';
+  }
+
+  if (redirectOrigin.includes('0.0.0.0')) {
+    redirectOrigin = redirectOrigin.replace('0.0.0.0', 'localhost');
+  }
+
+  const baseRedirectUrl = new URL('/dashboard/settings/integrations', redirectOrigin);
 
   // 1. Handle error returned from Google
   if (errorParam) {
@@ -60,8 +81,6 @@ export async function GET(request: NextRequest) {
   const userName = currentUser?.name || 'Administrator';
 
   // 5. Exchange code for tokens
-  const { clientId, clientSecret, redirectUri, hasClientId, hasClientSecret } = getGmailOAuthCredentials();
-
   if (!hasClientId || !hasClientSecret || !clientId || !clientSecret) {
     baseRedirectUrl.searchParams.set('error', 'server_oauth_credentials_missing');
     return NextResponse.redirect(baseRedirectUrl);

@@ -134,7 +134,7 @@ export function SendQuotationWhatsAppModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col my-auto overflow-hidden animate-in fade-in-50 zoom-in-95 duration-150">
         
         {/* Header */}
@@ -286,12 +286,45 @@ export function SendQuotationWhatsAppModal({
                   Cancel
                 </button>
                 <button
+                  type="button"
+                  onClick={async () => {
+                    const clean = phone.replace(/\D/g, '');
+                    const full = clean.startsWith('91') ? clean : clean.length === 10 ? '91' + clean : clean;
+                    const text = encodeURIComponent(
+                      `Hello ${quotation.customer_name},\n\nPlease find commercial quotation ${quotation.quotation_number} amounting to ₹${Math.round(quotation.grand_total).toLocaleString('en-IN')}/- from ICON TECH PRO.\n\nAll items are backed by official OEM manufacturer warranty & certified installation.\n\nWarm regards,\nICON TECH PRO\nPhone: +91 80999 09921`
+                    );
+                    window.open(`https://wa.me/${full}?text=${text}`, '_blank');
+                    // Audit log in communication center
+                    await queueOutboxMessage({
+                      entity_type: 'quotations',
+                      entity_id: quotation.id || quotation.quotation_number,
+                      quotation_id: quotation.id,
+                      recipient: phone,
+                      recipient_name: quotation.customer_name,
+                      channel: 'WHATSAPP',
+                      send_as_identity: 'ICON TECH PRO Business (+91 80999 09921)',
+                      subject: `Direct WhatsApp Dispatch ${quotation.quotation_number}`,
+                      template_id: 'wa_me_direct',
+                      template_data: { quote_number: quotation.quotation_number },
+                      message_body: `Direct wa.me launch to ${phone} for quote ${quotation.quotation_number}`,
+                    }).catch(() => {});
+                    await recordQuotationSent(quotation.id, { channel: 'WHATSAPP', recipient: phone }).catch(() => {});
+                    setSentSuccess(true);
+                    if (onSuccess) onSuccess();
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-xl transition cursor-pointer"
+                  title="Open direct WhatsApp Web / App chat"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Direct wa.me Chat</span>
+                </button>
+                <button
                   type="submit"
                   disabled={isSending}
-                  className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition disabled:opacity-50 cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{isSending ? 'Queueing...' : 'Queue WhatsApp Proposal'}</span>
+                  <span>{isSending ? 'Queueing...' : 'Queue via Cloud API'}</span>
                 </button>
               </div>
             </div>

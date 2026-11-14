@@ -9,6 +9,7 @@ import { getProducts } from '@/lib/actions/products';
 import { getFollowUps } from '@/lib/actions/operations';
 import { getAuditLogsStore } from '@/lib/audit/logger';
 import { isSupabaseAvailable, getDatabaseHealth } from '@/lib/supabase/health';
+import { requireAuth, requireRole } from '@/lib/auth/session';
 import type { 
   DashboardMetrics, 
   AuditLog, 
@@ -22,6 +23,7 @@ import type {
 export { getDatabaseHealth as getDatabaseStatus };
 
 export async function getDashboardMetrics(): Promise<DashboardMetrics> {
+  await requireAuth();
   const [
     custRes,
     enqRes,
@@ -95,6 +97,7 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
 }
 
 export async function getAuditLogs(): Promise<AuditLog[]> {
+  await requireRole(['Managing Director', 'Admin / BDM']);
   return getAuditLogsStore();
 }
 
@@ -103,6 +106,7 @@ export async function getAuditLogs(): Promise<AuditLog[]> {
 // ---------------------------------------------------------------------------
 
 export async function getSalesPipelineKPIs(): Promise<SalesPipelineKPIs> {
+  await requireAuth();
   const [enqRes, quoteRes, orderRes] = await Promise.all([
     getEnquiries(),
     getQuotations(),
@@ -148,6 +152,7 @@ export async function getSalesPipelineKPIs(): Promise<SalesPipelineKPIs> {
 }
 
 export async function getRevenueByCategory(): Promise<RevenueByCategory[]> {
+  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
   const [orderRes, prodRes] = await Promise.all([
     getOrders(),
     getProducts(),
@@ -200,6 +205,7 @@ export async function getRevenueByCategory(): Promise<RevenueByCategory[]> {
 }
 
 export async function getCustomerLTVMetrics(limit = 10): Promise<CustomerLTVMetric[]> {
+  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
   const [custRes, orderRes, invRes] = await Promise.all([
     getCustomers(),
     getOrders(),
@@ -245,6 +251,7 @@ export async function getCustomerLTVMetrics(limit = 10): Promise<CustomerLTVMetr
 }
 
 export async function getCollectionEfficiencyMetrics(): Promise<CollectionEfficiencyMetric> {
+  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
   const [invRes, agingRes] = await Promise.all([
     getInvoices(),
     getAccountsAging(),
@@ -283,6 +290,7 @@ export async function getCollectionEfficiencyMetrics(): Promise<CollectionEffici
 }
 
 export async function getBusinessKPIsSummary(): Promise<BusinessKPIsSummary> {
+  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
   const [pipeline, revenue_by_category, top_customers_by_ltv, collection_efficiency] = await Promise.all([
     getSalesPipelineKPIs(),
     getRevenueByCategory(),

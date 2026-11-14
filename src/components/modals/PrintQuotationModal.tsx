@@ -1,8 +1,9 @@
 'use client';
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X, Printer, Download, FileText, CheckCircle2, Mail, MessageSquare, ShieldCheck } from 'lucide-react';
-import type { Quotation } from '@/types/erp';
+import type { Quotation, QuotationItem } from '@/types/erp';
 import { recordQuotationPreview, verifyAndApproveQuotation } from '@/lib/actions/quotations';
 import { SendQuotationEmailModal } from '@/components/modals/SendQuotationEmailModal';
 import { SendQuotationWhatsAppModal } from '@/components/modals/SendQuotationWhatsAppModal';
@@ -59,6 +60,128 @@ function numberToWordsINR(num: number): string {
   return result + ' Only.';
 }
 
+export interface FormattedCustomerProduct {
+  brandModel: string;
+  specs?: string;
+  description?: string;
+}
+
+/**
+ * Customer-Facing Product Parser:
+ * Formats product line items into a polished, easy-to-understand layout:
+ * BRAND – MODEL
+ * Key Specifications: [Important specifications presented clearly and concisely]
+ * Description: [Short, professional, customer-friendly description explaining the product, its purpose and important value/features]
+ */
+export function parseCustomerFacingProduct(it: QuotationItem): FormattedCustomerProduct {
+  let brand = (it.brand || it.category || '').trim();
+  let model = (it.model || it.sku || '').trim();
+  let specs = (it.specs || '').trim();
+  let description = (it.description || it.internal_remarks || '').trim();
+  const rawName = (it.product_name || '').trim();
+
+  // If brand/model or specs/description are missing, attempt parsing delimited product_name
+  // Pattern: "BRAND – MODEL – SPECS – DESCRIPTION"
+  if (rawName && (rawName.includes('–') || rawName.includes('—') || (rawName.includes(' - ') && !rawName.startsWith('[')))) {
+    const delim = rawName.includes('–') ? '–' : rawName.includes('—') ? '—' : '-';
+    const parts = rawName.split(delim).map((p) => p.trim()).filter(Boolean);
+
+    if (parts.length >= 4) {
+      if (!brand) brand = parts[0];
+      if (!model) model = parts[1];
+      if (!specs) specs = parts[2];
+      if (!description) description = parts.slice(3).join(' – ');
+    } else if (parts.length === 3) {
+      if (!brand) brand = parts[0];
+      if (!model) model = parts[1];
+      if (!specs && !description) {
+        specs = parts[2];
+      }
+    } else if (parts.length === 2 && (!brand || !model)) {
+      if (!brand) brand = parts[0];
+      if (!model) model = parts[1];
+    }
+  }
+
+  // Clean description of any legacy boilerplate or repeated labels
+  if (description) {
+    description = description
+      .replace(/^description[:\s-]*/i, '')
+      .replace(/^(?:•|-|\*)\s*/, '')
+      .trim();
+
+    // Check for corporate marketing boilerplate
+    const isBoilerplate = [
+      /\bsubsidiary\s+of\b/i,
+      /\bworld-?leading\s+human\s+technology\b/i,
+      /\bheadquartered\s+in\b/i,
+      /\bincorporated\s+in\b/i,
+      /\bpvt\.?\s*ltd\.?\b/i,
+      /\ball\s+rights\s+reserved\b/i,
+      /\bbuy\s+online\s+at\s+best\s+price\b/i,
+      /\bcanon\s+india\s+pvt\b/i,
+      /\bbenq\s+corporation\s+is\s+a\s+world\b/i,
+    ].some((pattern) => pattern.test(description));
+
+    if (isBoilerplate) {
+      const descLower = (specs + ' ' + rawName + ' ' + model).toLowerCase();
+      if (descLower.includes('printer') || descLower.includes('laser') || descLower.includes('mf3010') || descLower.includes('imageclass')) {
+        description = 'High-efficiency commercial multifunction laser printer engineered for fast, reliable document handling, sharp text output, and dependable enterprise productivity.';
+      } else if (descLower.includes('projector') || descLower.includes('lumens') || descLower.includes('tk710')) {
+        description = 'High-brightness 4K UHD laser/LED home and entertainment projector designed for vibrant cinematic viewing and responsive gaming even in well-lit rooms.';
+      } else if (descLower.includes('panel') || descLower.includes('viewboard') || descLower.includes('touch')) {
+        description = 'Commercial 4K UHD interactive display featuring responsive multi-touch technology, integrated audio, and collaboration tools for modern workspaces.';
+      } else {
+        description = `${brand ? brand + ' ' : ''}${model ? model + ' ' : ''}high-performance enterprise commercial equipment engineered for reliability and seamless integration.`.trim();
+      }
+    }
+  }
+
+  // Clean specs of any legacy prefix
+  if (specs) {
+    specs = specs
+      .replace(/^key specifications[:\s-]*/i, '')
+      .replace(/^specs[:\s-]*/i, '')
+      .trim();
+  }
+
+  // Service line check: eliminate redundant or synthetic specs on pure service items
+  if (
+    it.category?.toLowerCase() === 'services' ||
+    it.sku?.startsWith('SRV-') ||
+    (rawName.toLowerCase().includes('installation') && !brand && !model) ||
+    specs.toLowerCase() === 'standard commercial specifications' ||
+    specs === description
+  ) {
+    if (
+      it.category?.toLowerCase() === 'services' ||
+      it.sku?.startsWith('SRV-') ||
+      (rawName.toLowerCase().includes('installation') && !brand && !model)
+    ) {
+      specs = '';
+    }
+  }
+
+  // Prominent BRAND – MODEL header (prevent duplicate brand repetition)
+  let brandModel = '';
+  if (brand && model) {
+    const cleanModel = model.replace(new RegExp(`^${brand}\\s*`, 'i'), '').trim();
+    brandModel = `${brand.toUpperCase()} – ${(cleanModel || model).toUpperCase()}`;
+  } else if (brand) {
+    brandModel = brand.toUpperCase();
+  } else if (model) {
+    brandModel = model.toUpperCase();
+  } else {
+    brandModel = rawName;
+  }
+
+  return {
+    brandModel,
+    specs: specs || undefined,
+    description: description || undefined,
+  };
+}
+
 interface PrintQuotationModalProps {
   quotation: Quotation | null;
   isOpen: boolean;
@@ -66,6 +189,7 @@ interface PrintQuotationModalProps {
 }
 
 export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotationModalProps) {
+  const [isClient, setIsClient] = React.useState(false);
   const [quotationState, setQuotationState] = React.useState<Quotation | null>(quotation);
   const [isVerified, setIsVerified] = React.useState(false);
   const [isApproved, setIsApproved] = React.useState(false);
@@ -75,13 +199,19 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
   const [showRevisions, setShowRevisions] = React.useState(false);
 
   React.useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  React.useEffect(() => {
     setQuotationState(quotation);
     if (quotation) {
       const alreadyApproved = quotation.status === 'Approved' || quotation.status === 'Sent' || quotation.status === 'Accepted';
       setIsApproved(alreadyApproved);
       setIsVerified(alreadyApproved);
-      // Auto-record PDF preview requirement
-      recordQuotationPreview(quotation.id).catch(() => {});
+      // Auto-record PDF preview requirement only for persisted quotations
+      if (quotation.id && quotation.id !== 'new-quotation-preview') {
+        recordQuotationPreview(quotation.id).catch(() => {});
+      }
     }
   }, [quotation, isOpen]);
 
@@ -111,8 +241,6 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
     }
   }, [isOpen, onClose]);
 
-  if (!isOpen || !quotation) return null;
-
   // Format date helper: "08 Sep 2026"
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return '08 Sep 2026';
@@ -131,6 +259,7 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
 
   // Calculate validity date or days
   const formatValidity = () => {
+    if (!quotation) return '7 Days';
     if (quotation.valid_until) return formatDate(quotation.valid_until);
     if (quotation.quotation_date && quotation.validity_days) {
       try {
@@ -144,8 +273,49 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
     return `${quotation.validity_days || 7} Days`;
   };
 
-  const totalQty = quotation.items.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
-  const bank = quotation.bank_details || {
+  const totalQty = (quotation?.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+
+  const sectionGroups = React.useMemo(() => {
+    if (!quotation) return null;
+    if (quotation.project_sections && quotation.project_sections.length > 0) {
+      return quotation.project_sections.map((s) => ({
+        section_title: s.section_title,
+        items: s.items,
+        section_subtotal: Number(
+          s.section_total ||
+            s.section_subtotal ||
+            s.items.reduce(
+              (acc, it) => acc + (it.selling_price * it.quantity - (it.discount_amount || 0)),
+              0
+            )
+        ),
+      }));
+    }
+
+    const hasItemSections = (quotation.items || []).some((it) => !!it.section_id);
+    const isProject = quotation.quotation_format && quotation.quotation_format !== 'STANDARD';
+
+    if (hasItemSections || isProject) {
+      const map = new Map<string, QuotationItem[]>();
+      for (const it of quotation.items || []) {
+        const title = it.section_id || 'GENERAL';
+        if (!map.has(title)) map.set(title, []);
+        map.get(title)!.push(it);
+      }
+      return Array.from(map.entries()).map(([section_title, secItems]) => ({
+        section_title,
+        items: secItems,
+        section_subtotal: secItems.reduce(
+          (acc, it) => acc + (it.selling_price * it.quantity - (it.discount_amount || 0)),
+          0
+        ),
+      }));
+    }
+
+    return null;
+  }, [quotation]);
+
+  const bank = quotation?.bank_details || {
     bank_name: 'IDBI Bank',
     account_holder: 'ICON TECH PRO',
     account_number: '0426653800000161',
@@ -153,7 +323,7 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
     branch: 'BANDRI COMPLEX',
   };
 
-  const terms = (quotation.terms_conditions && quotation.terms_conditions.length > 0)
+  const terms = (quotation?.terms_conditions && quotation.terms_conditions.length > 0)
     ? quotation.terms_conditions
     : [
         'Payment : 100% ADVANCE PAYMENT',
@@ -164,13 +334,14 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
         'TRANSPORTATION AND INSTALLATION CHARGES INCLUSIVE',
       ];
 
-  const placeOfSupply = quotation.place_of_supply || '36-TELANGANA';
+  const placeOfSupply = quotation?.place_of_supply || '36-TELANGANA';
   const isTelangana = placeOfSupply.startsWith('36');
-  const dispatchAddress = quotation.dispatch_from ||
+  const dispatchAddress = quotation?.dispatch_from ||
     '7-1-62/A, FLAT NO-503, 5 TH FLOOR, AMEER ESTATE\nSANJEEVA REDDY NAGAR, SANJEEVA REDDY NAGAR\nHyderabad, TELANGANA, 500038';
 
   // Multi-Download handler: Save to PDF with exact clean filename ICON_TECH_PRO_Quotation_QT-2026-27-0048
   const handleDownloadPDF = () => {
+    if (!quotation) return;
     const sanitizedQuoteNum = (quotation.quotation_number || 'QTN').replace(/[\/\\]/g, '-');
     const docTitle = `ICON_TECH_PRO_Quotation_${sanitizedQuoteNum}`;
     const prev = document.title;
@@ -183,6 +354,7 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
 
   // Download Offline Standalone HTML Proposal
   const handleDownloadOfflineHTML = () => {
+    if (!quotation) return;
     const cleanCompany = (quotation.company_name || quotation.customer_name || 'Customer')
       .replace(/[^a-zA-Z0-9_-]/g, '_');
     const docElement = document.getElementById('printable-quotation-content');
@@ -253,10 +425,12 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
     URL.revokeObjectURL(url);
   };
 
-  return (
+  if (!isClient || !isOpen || !quotation) return null;
+
+  return createPortal(
     <>
     <div
-      className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-sm overflow-y-auto p-2 sm:p-4 md:p-6 print:p-0 print:bg-white print:static"
+      className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm overflow-y-auto p-2 sm:p-4 md:p-6 print:p-0 print:bg-white print:static"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -286,6 +460,18 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
               )}
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+              {!isApproved && quotationState?.id && quotationState.id !== 'new-quotation-preview' && (
+                <button
+                  type="button"
+                  disabled={isVerifying}
+                  onClick={handleVerifyAndApprove}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 sm:px-3 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-xl transition cursor-pointer"
+                  title="Approve Proposal"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{isVerifying ? 'Approving...' : 'Approve'}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShowRevisions(!showRevisions)}
@@ -498,9 +684,9 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {quotation.quotation_format === 'DETAILED_PROJECT' && quotation.project_sections && quotation.project_sections.length > 0 ? (
-                  quotation.project_sections.map((sec, sIdx) => (
-                    <React.Fragment key={sec.section_id || sIdx}>
+                {sectionGroups && sectionGroups.length > 0 ? (
+                  sectionGroups.map((sec, sIdx) => (
+                    <React.Fragment key={sec.section_title || sIdx}>
                       <tr className="bg-slate-100 font-black text-slate-800 text-[11px]">
                         <td colSpan={6} className="py-2 px-3 tracking-wide uppercase">
                           {sec.section_title}
@@ -524,10 +710,33 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
                             <td className="py-2 px-2.5 text-center font-bold text-slate-700">
                               {idx + 1}
                             </td>
-                            <td className="py-2 px-3">
-                              <p className="font-bold text-slate-950 whitespace-pre-line leading-relaxed">
-                                {it.product_name}
-                              </p>
+                            <td className="py-2.5 px-3">
+                              {(() => {
+                                const prod = parseCustomerFacingProduct(it);
+                                return (
+                                  <div className="space-y-1.5 py-0.5 text-left">
+                                    <div className="font-extrabold text-slate-950 text-[12px] tracking-tight uppercase">
+                                      {prod.brandModel}
+                                    </div>
+                                    {prod.specs && (
+                                      <div className="text-[11px] leading-relaxed text-slate-700">
+                                        <span className="font-bold text-slate-900 block mb-0.5">Key Specifications:</span>
+                                        <p className="text-slate-700 font-normal whitespace-pre-line">
+                                          {prod.specs}
+                                        </p>
+                                      </div>
+                                    )}
+                                    {prod.description && (
+                                      <div className="text-[11px] leading-relaxed text-slate-700">
+                                        <span className="font-bold text-slate-900 block mb-0.5">Description:</span>
+                                        <p className="text-slate-600 font-normal whitespace-pre-line">
+                                          {prod.description}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
                             <td className="py-2 px-3 text-center text-slate-700">
                               {it.hsn_sac || '-'}
@@ -549,7 +758,7 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
                           {sec.section_title} Subtotal:
                         </td>
                         <td className="py-1 px-3 text-right">
-                          ₹{Number(sec.section_total || sec.section_subtotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          ₹{Number(sec.section_subtotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
                       </tr>
                     </React.Fragment>
@@ -574,9 +783,32 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
                           {idx + 1}
                         </td>
                         <td className="py-2.5 px-3">
-                          <p className="font-bold text-slate-950 whitespace-pre-line leading-relaxed">
-                            {it.product_name}
-                          </p>
+                          {(() => {
+                            const prod = parseCustomerFacingProduct(it);
+                            return (
+                              <div className="space-y-1.5 py-0.5 text-left">
+                                <div className="font-extrabold text-slate-950 text-[12px] tracking-tight uppercase">
+                                  {prod.brandModel}
+                                </div>
+                                {prod.specs && (
+                                  <div className="text-[11px] leading-relaxed text-slate-700">
+                                    <span className="font-bold text-slate-900 block mb-0.5">Key Specifications:</span>
+                                    <p className="text-slate-700 font-normal whitespace-pre-line">
+                                      {prod.specs}
+                                    </p>
+                                  </div>
+                                )}
+                                {prod.description && (
+                                  <div className="text-[11px] leading-relaxed text-slate-700">
+                                    <span className="font-bold text-slate-900 block mb-0.5">Description:</span>
+                                    <p className="text-slate-600 font-normal whitespace-pre-line">
+                                      {prod.description}
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="py-2.5 px-3 text-center text-slate-700">
                           {it.hsn_sac || '-'}
@@ -606,7 +838,7 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
               <div className="flex justify-between">
                 <span className="font-semibold text-slate-700">Taxable Amount</span>
                 <span className="font-semibold text-slate-900">
-                  ₹{quotation.taxable_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ₹{(quotation.taxable_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               {isTelangana ? (
@@ -635,7 +867,7 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
               <div className="flex justify-between items-baseline pt-1 border-t border-slate-300">
                 <span className="text-sm font-black text-slate-950">Total</span>
                 <span className="text-base font-black text-slate-950">
-                  ₹{Math.round(quotation.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ₹{Math.round(quotation.grand_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
             </div>
@@ -738,6 +970,18 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
             {(quotation.revision_number || 1) > 1 && ` • Revision ${quotation.revision_number}`}
           </div>
           <div className="flex items-center gap-2 sm:gap-2.5">
+            {!isApproved && quotationState?.id && quotationState.id !== 'new-quotation-preview' && (
+              <button
+                type="button"
+                disabled={isVerifying}
+                onClick={handleVerifyAndApprove}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-xl shadow-xs transition cursor-pointer"
+                title="Verify and Approve Proposal for Multi-Channel Dispatch"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{isVerifying ? 'Approving...' : 'Approve Proposal'}</span>
+              </button>
+            )}
             <button
               type="button"
               disabled={!isApproved}
@@ -805,6 +1049,7 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
     isOpen={isWhatsAppModalOpen}
     onClose={() => setIsWhatsAppModalOpen(false)}
   />
-</>
-);
+    </>,
+    document.body
+  );
 }

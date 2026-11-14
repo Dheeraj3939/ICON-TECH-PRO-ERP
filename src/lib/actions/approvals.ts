@@ -1,8 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isUuid, sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
@@ -118,6 +118,22 @@ export async function getApprovalRules(): Promise<ApprovalRuleConfig[]> {
   return getInternalRulesStore();
 }
 
+function hydrateApprovalRow(row: any): ApprovalRequest {
+  const meta = row.meta && typeof row.meta === 'object' ? row.meta : {};
+  return {
+    ...row,
+    requested_by_role: row.requested_by_role || meta.requested_by_role || 'Sales Executive',
+    required_approver_role: row.required_approver_role || row.required_role || 'Managing Director',
+    requested_value: Number(row.requested_value ?? meta.requested_value ?? 0),
+    threshold_limit: Number(row.threshold_limit ?? meta.threshold_limit ?? 0),
+    approval_notes: row.approval_notes ?? meta.approval_notes,
+    prevent_self_approval: row.prevent_self_approval ?? meta.prevent_self_approval ?? true,
+    approver_id: row.approver_id ?? row.approved_by_id,
+    approver_name: row.approver_name ?? row.approved_by_name,
+    updated_at: row.updated_at ?? row.actioned_at ?? row.created_at,
+  } as ApprovalRequest;
+}
+
 export async function getApprovalRequests(filters?: {
   status?: ApprovalRequestStatus;
   type?: ApprovalType;
@@ -130,20 +146,30 @@ export async function getApprovalRequests(filters?: {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('approval_requests').select('*', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('approval_requests').select('*', { count: 'exact' });
 
       if (filters?.status) {
         query = query.eq('status', filters.status);
+      } else if (filters?.scope === 'PENDING' || filters?.scope === 'APPROVED' || filters?.scope === 'REJECTED') {
+        query = query.eq('status', filters.scope);
       }
       if (filters?.type) {
         query = query.eq('approval_type', filters.type);
       }
 
       query = query.order('created_at', { ascending: false });
-      const { data, error, count } = await query;
-      if (!error && data && data.length > 0) {
-        return { requests: data as ApprovalRequest[], total: count ?? data.length };
+      const { data, error } = await query;
+      if (!error && data) {
+        let rows = data.map(hydrateApprovalRow);
+        if (filters?.scope === 'MY_REQUESTS' && authUser) {
+          rows = rows.filter(
+            (r) =>
+              r.requested_by_id === authUser.id ||
+              r.requested_by_name.toLowerCase() === authUser.name.toLowerCase()
+          );
+        }
+        return { requests: rows, total: rows.length };
       }
     } catch (err) {
       console.warn('Supabase approval_requests query fallback to memory:', err);
@@ -240,21 +266,34 @@ export async function createApprovalRequest(payload: {
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin.from('approval_requests').insert({
-          request_number: request.request_number,
-          approval_type: request.approval_type,
-          entity_type: request.entity_type,
-          entity_id: request.entity_id,
-          entity_number: request.entity_number,
-          requested_by_name: request.requested_by_name,
-          requested_by_role: request.requested_by_role,
-          required_approver_role: request.required_approver_role,
-          requested_value: request.requested_value,
-          threshold_limit: request.threshold_limit,
-          status: request.status,
-          approval_notes: request.approval_notes || null,
-          prevent_self_approval: request.prevent_self_approval,
-        });
+        const { data: dbReq } = await admin
+          .from('approval_requests')
+          .insert({
+            request_number: request.request_number,
+            approval_type: request.approval_type,
+            entity_type: request.entity_type,
+            entity_id: request.entity_id,
+            entity_number: request.entity_number,
+            requested_by_id: sanitizeUuid(request.requested_by_id),
+            requested_by_name: request.requested_by_name,
+            required_role: request.required_approver_role,
+            old_value: request.old_value ?? null,
+            proposed_value: request.proposed_value ?? null,
+            rule_id: request.rule_id || null,
+            status: request.status,
+            meta: {
+              requested_by_role: request.requested_by_role,
+              requested_value: request.requested_value,
+              threshold_limit: request.threshold_limit,
+              approval_notes: request.approval_notes || null,
+              prevent_self_approval: request.prevent_self_approval,
+            },
+          })
+          .select('id')
+          .single();
+        if (dbReq?.id) {
+          request.id = dbReq.id;
+        }
       } catch (err) {
         console.warn('Supabase createApprovalRequest insert fallback:', err);
       }
@@ -286,8 +325,7 @@ export async function processApprovalRequest(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Accounts']);
-    const store = getInternalRequestsStore();
-
+    const { requests: store } = await getApprovalRequests();
     const found = store.find((r) => r.id === requestId || r.request_number === requestId);
     if (!found) {
       return { success: false, error: 'Approval request not found in active records.' };
@@ -303,6 +341,7 @@ export async function processApprovalRequest(
       'Sales Executive': 2,
       'Accounts': 3,
       'BDM': 4,
+      'Admin': 5,
       'Admin / BDM': 5,
       'Managing Director': 6,
     };
@@ -357,22 +396,29 @@ export async function processApprovalRequest(
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin
-          .from('approval_requests')
-          .update({
-            status: found.status,
-            approver_name: authUser.name,
+        const existingMeta = (found as any).meta && typeof (found as any).meta === 'object' ? (found as any).meta : {};
+        const reqQuery = admin.from('approval_requests').update({
+          status: found.status,
+          decision: found.decision,
+          decision_date: found.decision_date,
+          approved_by_id: sanitizeUuid(authUser.id),
+          approved_by_name: authUser.name,
+          actioned_at: found.decision_date,
+          rejection_reason: found.rejection_reason || null,
+          meta: {
+            ...existingMeta,
             approval_notes: found.approval_notes || null,
-            rejection_reason: found.rejection_reason || null,
-            updated_at: found.updated_at,
-          })
-          .or(`id.eq.${requestId},request_number.eq.${requestId}`);
+          },
+        });
+        await (isUuid(found.id) ? reqQuery.eq('id', found.id) : reqQuery.eq('request_number', found.request_number));
 
         if (found.entity_type === 'quotations') {
-          await admin
+          const quoteQuery = admin
             .from('quotations')
-            .update({ status: decision === 'APPROVE' ? 'Approved' : 'Rejected' })
-            .or(`id.eq.${found.entity_id},quotation_number.eq.${found.entity_number}`);
+            .update({ status: decision === 'APPROVE' ? 'Approved' : 'Rejected' });
+          await (isUuid(found.entity_id)
+            ? quoteQuery.eq('id', found.entity_id)
+            : quoteQuery.eq('quotation_number', found.entity_number));
         }
       } catch (err) {
         console.warn('Supabase processApprovalRequest update fallback:', err);

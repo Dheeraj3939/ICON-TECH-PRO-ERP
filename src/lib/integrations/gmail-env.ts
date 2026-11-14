@@ -38,7 +38,11 @@ export function getGmailOAuthCredentials(): {
 } {
   let clientId = process.env.GOOGLE_CLIENT_ID?.trim() || null;
   let clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || null;
-  let redirectUri = process.env.GOOGLE_REDIRECT_URI?.trim() || 'http://localhost:3000/api/integrations/gmail/callback';
+  const isUat = process.env.NEXT_PUBLIC_ERP_ENV?.trim().toUpperCase() === 'UAT';
+  const configuredOrigin = process.env.NEXT_PUBLIC_SITE_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const defaultOrigin = configuredOrigin || (isUat ? 'http://localhost:3001' : 'https://erp.icontechpro.in');
+  const defaultRedirectUri = `${defaultOrigin.replace(/\/+$/, '')}/api/integrations/gmail/callback`;
+  let redirectUri = process.env.GOOGLE_REDIRECT_URI?.trim() || defaultRedirectUri;
 
   // Check if current process.env is missing or placeholder
   const isProcessIdPlaceholder = isPlaceholderCredential(clientId);
@@ -47,7 +51,8 @@ export function getGmailOAuthCredentials(): {
   // If missing or placeholder in memory, attempt to read live from .env.local
   if (!clientId || isProcessIdPlaceholder || !clientSecret || isProcessSecretPlaceholder) {
     try {
-      const envPath = path.resolve(process.cwd(), '.env.local');
+      const envFileName = isUat ? '.env.uat.local' : '.env.local';
+      const envPath = path.resolve(process.cwd(), envFileName);
       if (fs.existsSync(envPath)) {
         const content = fs.readFileSync(envPath, 'utf8');
         const lines = content.split(/\r?\n/);

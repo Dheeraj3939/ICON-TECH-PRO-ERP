@@ -495,7 +495,7 @@ export default function ServicePage() {
             ))}
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'claims' ? (
         /* Warranty Claims Zero-Scroll Register */
         <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
           {/* Desktop Zero-Scroll Table */}
@@ -621,7 +621,7 @@ export default function ServicePage() {
             ))}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* AMC Intelligence & 45-Day Proactive Renewal Radar */}
       {activeTab === 'intelligence' && (

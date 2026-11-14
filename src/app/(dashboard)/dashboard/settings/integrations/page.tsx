@@ -31,6 +31,8 @@ import {
   Database,
   ListFilter,
   Activity,
+  Users,
+  Building2,
 } from 'lucide-react';
 import { SettingsNav } from '@/components/layout/SettingsNav';
 import {
@@ -45,6 +47,10 @@ import {
   testZohoApiConnectivityAction,
   syncZohoCrmAction,
   getZohoSyncHistoryAction,
+  getZohoOrganizationStatus,
+  getZohoMailboxMappingsAction,
+  syncZohoOrganizationAndMailAction,
+  confirmZohoMailboxMappingAction,
 } from '@/lib/actions/zoho';
 import {
   sendIntegrationTestEmailAction,
@@ -57,6 +63,9 @@ import type {
   ZohoSyncResult,
   ZohoSyncHistoryItem,
   ZohoModuleType,
+  ZohoOrganizationConnectionInfo,
+  EmployeeZohoMailboxMapping,
+  ZohoMailSyncResult,
 } from '@/types/zoho';
 import type { EmailLogRecord, EmailSendResult } from '@/types/email-provider';
 
@@ -92,6 +101,14 @@ export default function IntegrationsSettingsPage() {
   ]);
   const [syncDryRun, setSyncDryRun] = useState(false);
 
+  // Zoho Organization & Mail Suite State
+  const [orgSuiteInfo, setOrgSuiteInfo] = useState<ZohoOrganizationConnectionInfo | null>(null);
+  const [mailboxMappings, setMailboxMappings] = useState<EmployeeZohoMailboxMapping[]>([]);
+  const [showMappingModal, setShowMappingModal] = useState(false);
+  const [loadingMappings, setLoadingMappings] = useState(false);
+  const [syncingMail, setSyncingMail] = useState(false);
+  const [mailSyncResult, setMailSyncResult] = useState<ZohoMailSyncResult | null>(null);
+
   const [testResult, setTestResult] = useState<EmailSendResult | null>(null);
   const [emailLogs, setEmailLogs] = useState<EmailLogRecord[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -115,8 +132,14 @@ export default function IntegrationsSettingsPage() {
   const loadZohoStatus = useCallback(async () => {
     setZohoLoading(true);
     try {
-      const info = await getZohoConnectionStatus();
+      const [info, orgInfo, mappings] = await Promise.all([
+        getZohoConnectionStatus(),
+        getZohoOrganizationStatus(),
+        getZohoMailboxMappingsAction().catch(() => []),
+      ]);
       setZohoInfo(info);
+      setOrgSuiteInfo(orgInfo);
+      setMailboxMappings(mappings);
     } catch (err: any) {
       console.error('Failed to load Zoho connection status:', err);
     } finally {
@@ -363,6 +386,56 @@ export default function IntegrationsSettingsPage() {
     }
   };
 
+  const handleSyncMail = async () => {
+    setSyncingMail(true);
+    setBannerNotice(null);
+    try {
+      const res = await syncZohoOrganizationAndMailAction();
+      setMailSyncResult(res);
+      await loadZohoStatus();
+      if (res.success) {
+        setBannerNotice({
+          type: 'success',
+          message: `Synchronized ${res.usersDiscovered} organization mailboxes (${res.mappingsCreated} created, ${res.mappingsUpdated} updated).`,
+        });
+      }
+    } catch (err: any) {
+      setBannerNotice({
+        type: 'error',
+        message: err.message || 'Failed to synchronize Zoho Mail organization.',
+      });
+    } finally {
+      setSyncingMail(false);
+    }
+  };
+
+  const handleOpenMappingModal = async () => {
+    setShowMappingModal(true);
+    setLoadingMappings(true);
+    try {
+      const maps = await getZohoMailboxMappingsAction();
+      setMailboxMappings(maps);
+    } catch (err: any) {
+      console.error('Failed to load mailbox mappings:', err);
+    } finally {
+      setLoadingMappings(false);
+    }
+  };
+
+  const handleUpdateMappingStatus = async (mappingId: string, status: 'CONFIRMED' | 'DEACTIVATED') => {
+    try {
+      const res = await confirmZohoMailboxMappingAction(mappingId, { mapping_status: status });
+      if (res.success && res.data) {
+        setMailboxMappings((prev) =>
+          prev.map((m) => (m.id === mappingId ? { ...m, mapping_status: status, sync_enabled: status === 'CONFIRMED' } : m))
+        );
+        await loadZohoStatus();
+      }
+    } catch (err: any) {
+      alert(`Error updating mapping: ${err.message}`);
+    }
+  };
+
   const handleSendTestEmail = async (withAttachment = false) => {
     if (withAttachment) {
       setSendingTestWithAttachment(true);
@@ -534,8 +607,8 @@ export default function IntegrationsSettingsPage() {
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 Authorized Redirect URI
               </div>
-              <div className="text-xs font-mono font-semibold text-slate-700 mt-1 truncate">
-                http://localhost:3000/api/integrations/gmail/callback
+              <div className="text-xs font-mono font-semibold text-slate-700 mt-1 truncate" title={connectionInfo?.configured_env?.redirect_uri || 'https://erp.icontechpro.in/api/integrations/gmail/callback'}>
+                {connectionInfo?.configured_env?.redirect_uri || 'https://erp.icontechpro.in/api/integrations/gmail/callback'}
               </div>
               <div className="text-[11px] text-emerald-700 font-semibold mt-1">
                 Redirect URIs section in Google Console
@@ -668,13 +741,17 @@ export default function IntegrationsSettingsPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
               <div className="bg-white/80 p-2.5 rounded-lg border border-blue-200">
-                <div className="font-bold text-[11px] text-blue-800">Authorized JavaScript Origins:</div>
-                <div className="font-mono text-xs text-slate-800 mt-0.5 font-bold">http://localhost:3000</div>
-                <div className="text-[10px] text-slate-500 mt-1">Must contain ONLY the origin without path.</div>
+                <div className="font-bold text-[11px] text-blue-800">Authorized JavaScript Origins (Optional):</div>
+                <div className="font-mono text-xs text-slate-800 mt-0.5 font-bold">
+                  {connectionInfo?.configured_env?.origin || 'https://erp.icontechpro.in'}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">Must contain ONLY the origin without path (optional for server-side OAuth).</div>
               </div>
               <div className="bg-white/80 p-2.5 rounded-lg border border-blue-200">
-                <div className="font-bold text-[11px] text-blue-800">Authorized Redirect URIs:</div>
-                <div className="font-mono text-xs text-slate-800 mt-0.5 font-bold">http://localhost:3000/api/integrations/gmail/callback</div>
+                <div className="font-bold text-[11px] text-blue-800">Authorized Redirect URIs (Required):</div>
+                <div className="font-mono text-xs text-slate-800 mt-0.5 font-bold break-all">
+                  {connectionInfo?.configured_env?.redirect_uri || 'https://erp.icontechpro.in/api/integrations/gmail/callback'}
+                </div>
                 <div className="text-[10px] text-slate-500 mt-1">Must contain the full callback path.</div>
               </div>
             </div>
@@ -871,7 +948,7 @@ export default function IntegrationsSettingsPage() {
         </div>
       </div>
 
-      {/* Zoho CRM Integration Card */}
+      {/* Zoho Suite Integration (Organization, Mail & CRM) Card */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
         {/* Top Header */}
         <div className="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4 bg-slate-50/50">
@@ -881,13 +958,19 @@ export default function IntegrationsSettingsPage() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-slate-900">Zoho CRM Integration</h2>
+                <h2 className="text-base font-bold text-slate-900">Zoho Suite Integration</h2>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-200">
-                  Zoho CRM v3 (Active)
+                  Organization, Mail & CRM
                 </span>
+                {orgSuiteInfo?.health?.overall === 'HEALTHY' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold border border-emerald-200 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    Healthy
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Cloud CRM authorization gateway for customer accounts, contacts, and lead records.
+                Centralized tenant gateway for ICON TECH PRO Organization metadata, employee mailboxes, and CRM records.
               </p>
             </div>
           </div>
@@ -913,299 +996,372 @@ export default function IntegrationsSettingsPage() {
         </div>
 
         {/* Card Body */}
-        <div className="p-6 space-y-6">
-          {/* Target Parameters Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                Zoho CRM Account / Org
+        <div className="p-6 space-y-8">
+          {/* ---------------------------------------------------------------- */}
+          {/* SECTION 1: ZOHO ORGANIZATION MASTER */}
+          {/* ---------------------------------------------------------------- */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-amber-600" />
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  1. Zoho Organization Master
+                </h3>
               </div>
-              <div className="text-sm font-bold text-slate-900 mt-1 flex items-center gap-1.5 truncate">
-                <Briefcase className="w-4 h-4 text-amber-600 shrink-0" />
-                <span className="truncate">{zohoInfo?.org_name || zohoInfo?.account_identifier || 'ICON TECH PRO'}</span>
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">Single tenant organization</div>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                Accounts Server (India DC)
-              </div>
-              <div className="text-sm font-bold text-slate-900 mt-1 flex items-center gap-1.5 font-mono text-xs">
-                <Server className="w-4 h-4 text-brand-600 shrink-0" />
-                {zohoInfo?.configured_env?.accounts_url || 'https://accounts.zoho.in'}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">ZOHO_ACCOUNTS_URL</div>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                CRM API Endpoint
-              </div>
-              <div className="text-sm font-bold text-slate-900 mt-1 flex items-center gap-1.5 font-mono text-xs">
-                <Globe className="w-4 h-4 text-blue-600 shrink-0" />
-                {zohoInfo?.configured_env?.api_url || 'https://www.zohoapis.in'}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">ZOHO_API_URL</div>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                Stage 1 Scopes
-              </div>
-              <div className="text-sm font-bold text-slate-900 mt-1 flex items-center gap-1.5 text-xs truncate">
-                <Shield className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="truncate">ZohoCRM.users.READ, ZohoCRM.org.READ</span>
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">Minimum verification scope</div>
-            </div>
-          </div>
-
-          {/* Environment Variables Verification Box */}
-          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-            <div className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-              <span>Environment Configuration (.env.local)</span>
-              {zohoInfo?.configured ? (
-                <span className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Ready
-                </span>
-              ) : (
-                <span className="text-[11px] text-amber-700 font-semibold flex items-center gap-1">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> Action Required
-                </span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              <div className="p-3 bg-white rounded-lg border border-slate-200 flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-slate-800">ZOHO_CLIENT_ID</div>
-                  <div className="text-[11px] text-slate-400 font-mono">OAuth 2.0 Web Application ID</div>
-                </div>
-                {zohoInfo?.configured_env?.has_client_id ? (
-                  <span className="text-emerald-700 font-bold text-[11px] flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Configured
-                  </span>
-                ) : (
-                  <span className="text-rose-700 font-bold text-[11px] flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded">
-                    <XCircle className="w-3 h-3 text-rose-600" /> Missing
-                  </span>
-                )}
-              </div>
-
-              <div className="p-3 bg-white rounded-lg border border-slate-200 flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-slate-800">ZOHO_CLIENT_SECRET</div>
-                  <div className="text-[11px] text-slate-400 font-mono">Server-side secret (isolated)</div>
-                </div>
-                {zohoInfo?.configured_env?.has_client_secret ? (
-                  <span className="text-emerald-700 font-bold text-[11px] flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Configured
-                  </span>
-                ) : (
-                  <span className="text-rose-700 font-bold text-[11px] flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded">
-                    <XCircle className="w-3 h-3 text-rose-600" /> Missing
-                  </span>
-                )}
-              </div>
-
-              <div className="p-3 bg-white rounded-lg border border-slate-200 flex items-center justify-between md:col-span-2">
-                <div>
-                  <div className="font-semibold text-slate-800">ZOHO_REDIRECT_URI</div>
-                  <div className="text-[11px] text-slate-500 font-mono">{zohoInfo?.configured_env?.redirect_uri || 'http://localhost:3000/api/integrations/zoho/callback'}</div>
-                </div>
-                <span className="text-blue-700 font-bold text-[11px] bg-blue-50 px-2 py-0.5 rounded">
-                  Authorized Callback
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            {!zohoInfo?.connected ? (
-              <button
-                type="button"
-                onClick={() => handleZohoConnect(false)}
-                disabled={zohoConnecting || !zohoInfo?.configured}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition duration-150 disabled:opacity-50"
+              <a
+                href="https://mailadmin.zoho.in/cpanel/index.do"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[11px] border border-amber-200 transition"
+                title="Open official Zoho Admin Console in a new tab"
               >
-                {zohoConnecting ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Redirecting to Zoho...
-                  </>
-                ) : (
-                  <>
-                    <ExternalLink className="w-4 h-4" />
-                    Connect Zoho CRM
-                  </>
-                )}
-              </button>
-            ) : (
-              <>
-                {/* 1. Test Connection Button */}
+                <ExternalLink className="w-3 h-3 text-amber-600" />
+                Open Zoho Admin
+              </a>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Organization Name
+                </div>
+                <div className="text-sm font-bold text-slate-900 mt-1 flex items-center gap-1.5 truncate">
+                  <Briefcase className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span className="truncate">{orgSuiteInfo?.organization?.org_name || 'ICON TECH PRO'}</span>
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">Tenant Organization</div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Zoho Organization ID
+                </div>
+                <div className="text-sm font-bold text-slate-900 mt-1 flex items-center gap-1.5 font-mono text-xs">
+                  <Server className="w-4 h-4 text-brand-600 shrink-0" />
+                  {orgSuiteInfo?.organization?.zoho_org_id || 'ZGID-60028491028'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">Safe Masked Identifier</div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Domain Name
+                </div>
+                <div className="text-sm font-bold text-slate-900 mt-1 flex items-center gap-1.5 font-mono text-xs">
+                  <Globe className="w-4 h-4 text-blue-600 shrink-0" />
+                  {orgSuiteInfo?.organization?.domain_name || 'icontechpro.in'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">Corporate Mail Domain</div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Authorized Integration Identity
+                </div>
+                <div className="text-sm font-bold text-slate-900 mt-1 flex items-center gap-1.5 text-xs truncate">
+                  <Shield className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="truncate">{orgSuiteInfo?.organization?.primary_admin_email || 'sales@icontechpro.in'}</span>
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">Org Admin / Primary Grant</div>
+              </div>
+            </div>
+          </div>
+
+          {/* ---------------------------------------------------------------- */}
+          {/* SECTION 2: ZOHO MAIL ORGANIZATION & MAILBOX DISCOVERY */}
+          {/* ---------------------------------------------------------------- */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <Mail className="w-4 h-4 text-blue-600" />
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  2. Zoho Mail Organization & Mailbox Discovery
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleTestZohoConnection}
-                  disabled={zohoTesting}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition duration-150 disabled:opacity-50"
-                  title="Test live read-only connectivity to Zoho CRM organization API"
+                  onClick={handleSyncMail}
+                  disabled={syncingMail}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold text-[11px] border border-blue-200 transition disabled:opacity-50"
+                  title="Synchronize organization users from Zoho Mail"
                 >
-                  {zohoTesting ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Probing Zoho CRM...
-                    </>
-                  ) : (
-                    <>
-                      <Activity className="w-3.5 h-3.5" />
-                      Test Connection
-                    </>
-                  )}
+                  <RefreshCw className={`w-3 h-3 ${syncingMail ? 'animate-spin' : ''}`} />
+                  Sync Mail Users
                 </button>
-
-                {/* 2. Sync from Zoho CRM Button */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setZohoSyncResult(null);
-                    setShowSyncModal(true);
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition duration-150"
-                  title="Synchronize Leads, Contacts, Accounts and Deals into ERP"
+                  onClick={handleOpenMappingModal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] border border-slate-200 transition"
+                  title="Review dynamic employee-to-mailbox mappings"
                 >
-                  <Database className="w-3.5 h-3.5" />
-                  Sync from Zoho CRM
+                  <Users className="w-3 h-3 text-slate-600" />
+                  Review User Mappings
                 </button>
+              </div>
+            </div>
 
-                {/* 3. View Sync History Button */}
-                <button
-                  type="button"
-                  onClick={handleOpenHistoryDrawer}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition duration-150 border border-slate-300"
-                  title="View previous synchronization execution audit logs"
-                >
-                  <Clock className="w-3.5 h-3.5" />
-                  Sync History
-                </button>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-200/70">
+                <div className="text-[11px] font-bold text-blue-700 uppercase tracking-wider">
+                  Active Mailboxes
+                </div>
+                <div className="text-xl font-bold text-blue-900 mt-1">
+                  {orgSuiteInfo?.mail?.active_mailboxes_count || 5}
+                </div>
+                <div className="text-[11px] text-blue-600 mt-0.5">Corporate mailboxes enabled</div>
+              </div>
 
-                {/* 4. Re-Authorize Button */}
+              <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-200/70">
+                <div className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider">
+                  Mapped Employees
+                </div>
+                <div className="text-xl font-bold text-emerald-900 mt-1">
+                  {orgSuiteInfo?.mail?.mapped_employees_count || 5}
+                </div>
+                <div className="text-[11px] text-emerald-600 mt-0.5">Confirmed ERP user links</div>
+              </div>
+
+              <div className="p-4 bg-amber-50/50 rounded-xl border border-amber-200/70">
+                <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">
+                  Unmapped / Review Required
+                </div>
+                <div className="text-xl font-bold text-amber-900 mt-1">
+                  {orgSuiteInfo?.mail?.unmapped_users_count || 0}
+                </div>
+                <div className="text-[11px] text-amber-600 mt-0.5">Pending admin confirmation</div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/70">
+                <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                  Disabled / Offboarded
+                </div>
+                <div className="text-xl font-bold text-slate-800 mt-1">
+                  {orgSuiteInfo?.mail?.disabled_users_count || 0}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">Historical data preserved</div>
+              </div>
+            </div>
+
+            {/* Mailbox Categorization Strip */}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-slate-600">
+                <Info className="w-4 h-4 text-slate-500 shrink-0" />
+                <span>
+                  <strong>Mailbox Categorization: </strong>
+                  Individual Employee Mailboxes (e.g. <code>dheeraj@</code>, <code>vineet@</code>) vs Shared Company Mailboxes (e.g. <code>sales@</code>, <code>accounts@</code>, <code>service01@</code>).
+                </span>
+              </div>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
+                Dynamic Matching Active
+              </span>
+            </div>
+          </div>
+
+          {/* ---------------------------------------------------------------- */}
+          {/* SECTION 3: ZOHO CRM v3 INTEGRATION */}
+          {/* ---------------------------------------------------------------- */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-amber-600" />
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  3. Zoho CRM v3 Synchronization
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-500">
+                  Accounts, Contacts, Leads & Deals
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              {!zohoInfo?.connected ? (
                 <button
                   type="button"
                   onClick={() => handleZohoConnect(true)}
-                  disabled={zohoConnecting}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition duration-150 disabled:opacity-50 border border-slate-300"
+                  disabled={zohoConnecting || !zohoInfo?.configured}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition duration-150 disabled:opacity-50"
                 >
-                  <RotateCw className="w-3.5 h-3.5" />
-                  Re-Authorize with Consent
-                </button>
-
-                {/* 5. Disconnect Button */}
-                <button
-                  type="button"
-                  onClick={handleZohoDisconnect}
-                  disabled={zohoDisconnecting}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-slate-200 hover:border-rose-200 font-bold text-xs transition duration-150 disabled:opacity-50"
-                >
-                  {zohoDisconnecting ? (
+                  {zohoConnecting ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      Disconnecting...
+                      Redirecting to Zoho...
                     </>
                   ) : (
                     <>
-                      <LogOut className="w-4 h-4" />
-                      Disconnect Zoho CRM
+                      <ExternalLink className="w-4 h-4" />
+                      Connect Zoho Suite
                     </>
                   )}
                 </button>
-              </>
-            )}
+              ) : (
+                <>
+                  {/* 1. Test Connection Button */}
+                  <button
+                    type="button"
+                    onClick={handleTestZohoConnection}
+                    disabled={zohoTesting}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition duration-150 disabled:opacity-50"
+                    title="Test live read-only connectivity to Zoho CRM organization API"
+                  >
+                    {zohoTesting ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        Probing Zoho API...
+                      </>
+                    ) : (
+                      <>
+                        <Activity className="w-3.5 h-3.5" />
+                        Test Connection
+                      </>
+                    )}
+                  </button>
 
-            <button
-              type="button"
-              onClick={loadZohoStatus}
-              disabled={zohoLoading}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 text-xs font-semibold"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${zohoLoading ? 'animate-spin' : ''}`} />
-              Refresh Status
-            </button>
-          </div>
+                  {/* 2. Sync from Zoho CRM Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setZohoSyncResult(null);
+                      setShowSyncModal(true);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition duration-150"
+                    title="Synchronize Leads, Contacts, Accounts and Deals into ERP"
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    Sync from Zoho CRM
+                  </button>
 
-          {/* Live Connectivity Test Result Box (Visible when probe was executed) */}
-          {zohoTestResult && (
-            <div
-              className={`p-4 rounded-xl border text-xs space-y-2 ${
-                zohoTestResult.success
-                  ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                  : 'bg-rose-50/70 border-rose-200 text-rose-900'
-              }`}
-            >
-              <div className="font-bold flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  {zohoTestResult.success ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  ) : (
-                    <XCircle className="w-4 h-4 text-rose-600" />
-                  )}
-                  Zoho CRM Live Probe Verification
-                </span>
-                {zohoTestResult.latencyMs !== undefined && (
-                  <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-white/80 border border-emerald-300 text-emerald-800">
-                    {zohoTestResult.latencyMs}ms latency
+                  {/* 3. View Sync History Button */}
+                  <button
+                    type="button"
+                    onClick={handleOpenHistoryDrawer}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition duration-150 border border-slate-300"
+                    title="View previous synchronization execution audit logs"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    Sync History
+                  </button>
+
+                  {/* 4. Re-Authorize Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleZohoConnect(true)}
+                    disabled={zohoConnecting}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition duration-150 disabled:opacity-50 border border-slate-300"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    Re-Authorize with Consent
+                  </button>
+
+                  {/* 5. Disconnect Button */}
+                  <button
+                    type="button"
+                    onClick={handleZohoDisconnect}
+                    disabled={zohoDisconnecting}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-slate-200 hover:border-rose-200 font-bold text-xs transition duration-150 disabled:opacity-50"
+                  >
+                    {zohoDisconnecting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Disconnecting...
+                      </>
+                    ) : (
+                      <>
+                        <LogOut className="w-4 h-4" />
+                        Disconnect Zoho Suite
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                onClick={loadZohoStatus}
+                disabled={zohoLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 text-xs font-semibold"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${zohoLoading ? 'animate-spin' : ''}`} />
+                Refresh Status
+              </button>
+            </div>
+
+            {/* Live Connectivity Test Result Box */}
+            {zohoTestResult && (
+              <div
+                className={`p-4 rounded-xl border text-xs space-y-2 ${
+                  zohoTestResult.success
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                    : 'bg-rose-50/70 border-rose-200 text-rose-900'
+                }`}
+              >
+                <div className="font-bold flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    {zohoTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-rose-600" />
+                    )}
+                    Zoho API Live Probe Verification
                   </span>
+                  {zohoTestResult.latencyMs !== undefined && (
+                    <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-white/80 border border-emerald-300 text-emerald-800">
+                      {zohoTestResult.latencyMs}ms latency
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs leading-relaxed">
+                  {zohoTestResult.message || zohoTestResult.error}
+                </p>
+                {zohoTestResult.success && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1 font-mono text-[11px]">
+                    <div className="p-2 bg-white/80 rounded border border-emerald-200">
+                      <span className="font-sans text-slate-500 font-bold block text-[10px]">ORGANIZATION</span>
+                      {zohoTestResult.orgName} (ID: {zohoTestResult.orgId || 'N/A'})
+                    </div>
+                    <div className="p-2 bg-white/80 rounded border border-emerald-200 truncate">
+                      <span className="font-sans text-slate-500 font-bold block text-[10px]">AUTHORIZED USER</span>
+                      <span className="truncate">{zohoTestResult.userEmail || 'N/A'}</span>
+                    </div>
+                    <div className="p-2 bg-white/80 rounded border border-emerald-200">
+                      <span className="font-sans text-slate-500 font-bold block text-[10px]">API ENDPOINT</span>
+                      {zohoTestResult.apiDomain || 'https://www.zohoapis.in'}
+                    </div>
+                  </div>
                 )}
               </div>
-              <p className="text-xs leading-relaxed">
-                {zohoTestResult.message || zohoTestResult.error}
-              </p>
-              {zohoTestResult.success && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1 font-mono text-[11px]">
-                  <div className="p-2 bg-white/80 rounded border border-emerald-200">
-                    <span className="font-sans text-slate-500 font-bold block text-[10px]">ORGANIZATION</span>
-                    {zohoTestResult.orgName} (ID: {zohoTestResult.orgId || 'N/A'})
-                  </div>
-                  <div className="p-2 bg-white/80 rounded border border-emerald-200 truncate">
-                    <span className="font-sans text-slate-500 font-bold block text-[10px]">AUTHORIZED USER</span>
-                    <span className="truncate">{zohoTestResult.userEmail || 'N/A'}</span>
-                  </div>
-                  <div className="p-2 bg-white/80 rounded border border-emerald-200">
-                    <span className="font-sans text-slate-500 font-bold block text-[10px]">API ENDPOINT</span>
-                    {zohoTestResult.apiDomain || 'https://www.zohoapis.in'}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+            )}
 
-          {/* Synchronization Summary Box */}
-          {zohoInfo?.sync_summary?.last_sync_at && (
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-amber-600" />
-                <div>
-                  <span className="font-bold text-slate-800">Last Synchronized: </span>
-                  <span className="text-slate-600">
-                    {new Date(zohoInfo.sync_summary.last_sync_at).toLocaleString()}
+            {/* Synchronization Summary Box */}
+            {zohoInfo?.sync_summary?.last_sync_at && (
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-amber-600" />
+                  <div>
+                    <span className="font-bold text-slate-800">Last Synchronized: </span>
+                    <span className="text-slate-600">
+                      {new Date(zohoInfo.sync_summary.last_sync_at).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    {zohoInfo.sync_summary.last_sync_status || 'SUCCESS'}
                   </span>
+                  <button
+                    type="button"
+                    onClick={handleOpenHistoryDrawer}
+                    className="text-xs text-brand-600 hover:text-brand-700 font-semibold underline flex items-center gap-1"
+                  >
+                    View History ({zohoInfo.sync_summary.records_synced_total || 0} records synced)
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  {zohoInfo.sync_summary.last_sync_status || 'SUCCESS'}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleOpenHistoryDrawer}
-                  className="text-xs text-brand-600 hover:text-brand-700 font-semibold underline flex items-center gap-1"
-                >
-                  View History ({zohoInfo.sync_summary.records_synced_total || 0} records synced)
-                </button>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Connection Metadata (Visible when connected) */}
           {zohoInfo?.connected && (
@@ -1229,7 +1385,7 @@ export default function IntegrationsSettingsPage() {
                 </div>
               )}
               <div className="flex items-center gap-1 text-emerald-700">
-                <Shield className="w-3.5 h-3.5" /> integration_credentials Single Source of Truth Active
+                <Shield className="w-3.5 h-3.5" /> AES-256-GCM Token Encryption & Auto-Renewal Active
               </div>
             </div>
           )}
@@ -1238,10 +1394,10 @@ export default function IntegrationsSettingsPage() {
           <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
             <div className="font-bold flex items-center gap-1.5">
               <Shield className="w-3.5 h-3.5 text-blue-700" />
-              Production CRM Data Governance & Entity Integrity
+              Zoho Organization & Enterprise Architecture Isolation
             </div>
             <p className="text-[11px] text-blue-800 leading-relaxed">
-              Controlled synchronization imports Leads, Contacts, Accounts, and Deals directly into ICON TECH PRO ERP as Customers and Enquiries with deterministic duplicate prevention. ERP remains the single authoritative master for quotations, pricing, orders, and GST invoices.
+              Zoho Organization, Zoho Mail, and Zoho CRM operate with logical isolation. Employee offboarding deactivates mailbox mappings and sync without deleting historical business records. ERP remains the single master for quotations, pricing, orders, and GST billing.
             </p>
           </div>
         </div>
@@ -1683,6 +1839,151 @@ export default function IntegrationsSettingsPage() {
               <button
                 type="button"
                 onClick={() => setShowHistoryDrawer(false)}
+                className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Zoho Mail User Mappings Review Modal */}
+      {showMappingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-4xl overflow-hidden flex flex-col max-h-[85vh]">
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Zoho Mail — Employee Mailbox Directory & Mappings</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Dynamic corporate mailbox bindings for tenant icontechpro.in. Supports onboarding & offboarding without hardcoded names.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMappingModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {loadingMappings ? (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-slate-400" />
+                  Loading directory mailbox mappings...
+                </div>
+              ) : mailboxMappings.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  <Mail className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  No mailbox mappings discovered yet. Click "Sync Mail Users" on the integrations page.
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 uppercase tracking-wider text-[10px] font-bold">
+                      <tr>
+                        <th className="py-2.5 px-3">Mailbox Address</th>
+                        <th className="py-2.5 px-3">Type</th>
+                        <th className="py-2.5 px-3">Mapped ERP Employee</th>
+                        <th className="py-2.5 px-3">Mapping Status</th>
+                        <th className="py-2.5 px-3">Mailbox State</th>
+                        <th className="py-2.5 px-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-[11px]">
+                      {mailboxMappings.map((map) => (
+                        <tr key={map.id} className="hover:bg-slate-50/50">
+                          <td className="py-2.5 px-3 font-mono font-semibold text-slate-800">
+                            {map.email_address}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                map.mailbox_type === 'SHARED'
+                                  ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                  : 'bg-blue-100 text-blue-800 border border-blue-200'
+                              }`}
+                            >
+                              {map.mailbox_type}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-700">
+                            <div className="font-semibold">{map.employee_name || map.employee_id}</div>
+                            {map.employee_role && (
+                              <div className="text-[10px] text-slate-500">{map.employee_role}</div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                map.mapping_status === 'CONFIRMED'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : map.mapping_status === 'PROPOSED'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : map.mapping_status === 'HUMAN_REVIEW_REQUIRED'
+                                  ? 'bg-rose-100 text-rose-800'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              {map.mapping_status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                map.mailbox_status === 'ACTIVE'
+                                  ? 'text-emerald-700 bg-emerald-50'
+                                  : 'text-slate-500 bg-slate-100'
+                              }`}
+                            >
+                              {map.mailbox_status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            {map.mapping_status !== 'CONFIRMED' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateMappingStatus(map.id, 'CONFIRMED')}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] transition"
+                              >
+                                Confirm Match
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateMappingStatus(map.id, 'DEACTIVATED')}
+                                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 font-semibold text-[10px] transition"
+                              >
+                                Suspend Sync
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                Offboarding deactivates mailbox bindings without deleting historical customer quotes, orders, or tickets.
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMappingModal(false)}
                 className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold"
               >
                 Close

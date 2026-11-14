@@ -16,6 +16,8 @@ export interface GmailConnectionInfo {
     has_client_secret: boolean;
     has_redirect_uri: boolean;
     is_placeholder?: boolean;
+    redirect_uri?: string;
+    origin?: string;
   };
 }
 

@@ -10,6 +10,11 @@ function NewQuotationContent() {
   const searchParams = useSearchParams();
   const enquiryId = searchParams?.get('enquiry_id');
   const customerId = searchParams?.get('customer_id');
+  const customerName = searchParams?.get('customer_name');
+  const siteVisit = searchParams?.get('site_visit');
+  const roomType = searchParams?.get('room_type');
+  const dimensions = searchParams?.get('dimensions');
+  const notes = searchParams?.get('notes');
 
   const [initialCustomer, setInitialCustomer] = useState<any>(undefined);
   const [enquiryContext, setEnquiryContext] = useState<any>(undefined);
@@ -19,6 +24,41 @@ function NewQuotationContent() {
     let isMounted = true;
 
     async function loadContext() {
+      // 1. Site visit parameter handling
+      if (siteVisit && isMounted) {
+        const category = (roomType || '').toLowerCase().includes('theater') || (roomType || '').toLowerCase().includes('cinema')
+          ? 'Home Theater'
+          : (roomType || 'AV Solution');
+
+        setEnquiryContext({
+          enquiry_id: siteVisit,
+          enquiry_number: siteVisit,
+          product_category: category,
+          requirement_summary: [
+            roomType ? `Room: ${roomType}` : '',
+            dimensions ? `Dimensions: ${dimensions}` : '',
+            notes ? `Site Notes: ${notes}` : '',
+            `Survey Ref: ${siteVisit}`,
+          ].filter(Boolean).join(' | '),
+          site_visit: {
+            visit_number: siteVisit,
+            room_type: roomType,
+            measurements: dimensions,
+            notes: notes,
+          },
+        });
+      }
+
+      // 2. Customer name fallback
+      if (customerName && isMounted && !customerId) {
+        setInitialCustomer((prev: any) => prev || {
+          name: customerName,
+          company: customerName,
+          phone: '',
+          email: '',
+          customer_type: 'B2B',
+        });
+      }
       if (enquiryId) {
         try {
           const res = await getEnquiries();

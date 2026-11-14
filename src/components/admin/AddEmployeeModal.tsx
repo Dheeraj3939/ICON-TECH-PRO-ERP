@@ -44,14 +44,16 @@ export function AddEmployeeModal({
     role: string;
     status: string;
     name: string;
+    inviteLink?: string;
   } | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
 
   // Form State - Step 1: Basic Details
   const [fullName, setFullName] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [phone, setPhone] = useState('');
+  const [loginEmail, setLoginEmail] = useState('');
   const [corporateEmail, setCorporateEmail] = useState('');
-  const [personalEmail, setPersonalEmail] = useState('');
   const [customEmployeeId, setCustomEmployeeId] = useState('');
   const [joiningDate, setJoiningDate] = useState(new Date().toISOString().split('T')[0]);
   const [department, setDepartment] = useState('Commercial Sales');
@@ -124,7 +126,8 @@ export function AddEmployeeModal({
     try {
       const res = await onboardEmployee({
         full_name: fullName,
-        corporate_email: corporateEmail,
+        login_email: loginEmail,
+        corporate_email: corporateEmail || undefined,
         phone,
         department,
         designation,
@@ -138,8 +141,9 @@ export function AddEmployeeModal({
         setCreatedEmployeeResult({
           employeeId: res.employee.employee_id,
           role,
-          status: 'ACTIVE',
+          status: 'INVITED',
           name: fullName,
+          inviteLink: res.inviteLink,
         });
         onSuccess(
           `Employee ${fullName} successfully onboarded (ID: ${res.employee.employee_id}) with role "${role}"!`
@@ -191,6 +195,32 @@ export function AddEmployeeModal({
                 {createdEmployeeResult.status}
               </span>
             </div>
+            {createdEmployeeResult.inviteLink && (
+              <div className="pt-2 mt-2 border-t border-slate-200 space-y-1.5">
+                <span className="text-[11px] font-semibold text-slate-600 block">
+                  Employee Activation / Set-Password Link:
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    readOnly
+                    value={createdEmployeeResult.inviteLink}
+                    className="w-full text-[11px] font-mono bg-white border border-slate-200 rounded px-2 py-1 text-slate-700"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(createdEmployeeResult.inviteLink || '');
+                      setCopiedInvite(true);
+                      setTimeout(() => setCopiedInvite(false), 2000);
+                    }}
+                    className="px-2.5 py-1 rounded bg-slate-900 text-white text-[11px] font-semibold whitespace-nowrap hover:bg-slate-800"
+                  >
+                    {copiedInvite ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2 pt-2 border-t">
@@ -321,13 +351,13 @@ export function AddEmployeeModal({
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Corporate Email *</label>
+                  <label className="block font-bold text-slate-700 mb-1">ERP Login Email *</label>
                   <input
                     type="email"
                     required
-                    value={corporateEmail}
-                    onChange={(e) => setCorporateEmail(e.target.value)}
-                    placeholder="ramesh@icontechpro.in"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="employee@example.com"
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500/20"
                   />
                 </div>
@@ -335,12 +365,12 @@ export function AddEmployeeModal({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Personal Email (Optional)</label>
+                  <label className="block font-bold text-slate-700 mb-1">Corporate Email (Optional)</label>
                   <input
                     type="email"
-                    value={personalEmail}
-                    onChange={(e) => setPersonalEmail(e.target.value)}
-                    placeholder="ramesh.personal@gmail.com"
+                    value={corporateEmail}
+                    onChange={(e) => setCorporateEmail(e.target.value)}
+                    placeholder="name@icontechpro.in"
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none"
                   />
                 </div>

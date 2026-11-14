@@ -1,6 +1,9 @@
+import { canExportCSV } from '@/lib/permissions/registry';
+
 /**
- * Universal CSV Exporter for ICON TECH PRO ERP
+ * Universal Secure CSV Exporter for ICON TECH PRO ERP
  * Provides 1-click browser CSV download for all tables.
+ * Hardened with RFC 4180 compliance, formula injection prevention, and optional RBAC enforcement.
  */
 export function exportToCSV<T extends Record<string, any>>(
   filename: string,
@@ -9,8 +12,14 @@ export function exportToCSV<T extends Record<string, any>>(
     key: keyof T | string;
     label: string;
     format?: (val: any, row: T) => string;
-  }[]
+  }[],
+  userRole?: string | null
 ) {
+  if (userRole !== undefined && userRole !== null && !canExportCSV(userRole)) {
+    alert('Access Denied: Exporting CSV records requires Managing Director, Admin / BDM, or Accounts privileges.');
+    return;
+  }
+
   if (!rows || rows.length === 0) {
     alert('No data available to export.');
     return;
@@ -27,7 +36,14 @@ export function exportToCSV<T extends Record<string, any>>(
         if (val === null || val === undefined) {
           val = '';
         }
-        return `"${String(val).replace(/"/g, '""')}"`;
+        let strVal = String(val);
+
+        // Security Hardening: Prevent CSV Formula Injection (=, +, -, @, \t, \r)
+        if (/^[=+\-@\t\r]/.test(strVal)) {
+          strVal = `'${strVal}`;
+        }
+
+        return `"${strVal.replace(/"/g, '""')}"`;
       })
       .join(',');
   });

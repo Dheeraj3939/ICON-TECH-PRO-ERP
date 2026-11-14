@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Settings2,
   Percent,
@@ -11,16 +11,14 @@ import {
   Info,
 } from 'lucide-react';
 import { SettingsNav } from '@/components/layout/SettingsNav';
-
-interface TierRule {
-  role: string;
-  limit: number;
-  approver: string;
-  description: string;
-}
+import {
+  getDiscountRulesAction,
+  saveDiscountRulesAction,
+  type DiscountTierRule,
+} from '@/lib/actions/discount-rules';
 
 export default function DiscountRulesPage() {
-  const [rules, setRules] = useState<TierRule[]>([
+  const [rules, setRules] = useState<DiscountTierRule[]>([
     {
       role: 'Sales Executive',
       limit: 5.0,
@@ -48,19 +46,45 @@ export default function DiscountRulesPage() {
   ]);
 
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getDiscountRulesAction()
+      .then((res) => {
+        if (res.success && res.rules?.length) {
+          setRules(res.rules);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   function handleLimitChange(index: number, newLimit: number) {
     const updated = [...rules];
     updated[index].limit = newLimit;
     setRules(updated);
     setSavedSuccess(false);
+    setSaveError(null);
   }
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    // In production, triggers Server Action to update `discount_approval_rules` in PostgreSQL
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 4000);
+    setSaving(true);
+    setSaveError(null);
+    setSavedSuccess(false);
+    try {
+      const res = await saveDiscountRulesAction(rules);
+      if (res.success) {
+        setSavedSuccess(true);
+        setTimeout(() => setSavedSuccess(false), 4000);
+      } else {
+        setSaveError(res.error || 'Failed to save thresholds.');
+      }
+    } catch (err: any) {
+      setSaveError(err?.message || 'Error saving thresholds.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -80,6 +104,12 @@ export default function DiscountRulesPage() {
           </p>
         </div>
 
+        {saveError && (
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+            <AlertTriangle className="w-4 h-4 text-rose-600" />
+            <span>{saveError}</span>
+          </div>
+        )}
         {savedSuccess && (
           <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold animate-in fade-in">
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />

@@ -3,9 +3,13 @@ import { cookies } from 'next/headers';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { DemoPresentationBar } from '@/components/layout/DemoPresentationBar';
+import { WorkNotificationToaster } from '@/components/notifications/WorkNotificationToaster';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { getUserEffectivePermissions } from '@/lib/actions/permissions';
 import { DEMO_MODE_COOKIE_NAME } from '@/lib/constants/demo-mode';
+import { UATReviewBanner } from '@/components/uat/UATReviewBanner';
+import { MfaGracePeriodBanner } from '@/components/security/MfaGracePeriodBanner';
+import { evaluateMfaPolicy } from '@/lib/security/mfa-service';
 import type { UserRoleName } from '@/types/database';
 
 export default async function DashboardLayout({
@@ -32,14 +36,23 @@ export default async function DashboardLayout({
   // Check if Demo/Training Mode is explicitly activated (defaults to false in production)
   const cookieStore = await cookies();
   const isDemoMode = cookieStore.get(DEMO_MODE_COOKIE_NAME)?.value === 'true';
+  const isUatEnvironment = process.env.NEXT_PUBLIC_ERP_ENV?.trim().toUpperCase() === 'UAT';
+
+  // Corporate MFA Policy (Immediate for MD/Admin/Accounts; 14-day grace period for Sales/Field)
+  const mfaPolicy = evaluateMfaPolicy({
+    id: authUser.id,
+    email: authUser.email,
+    role: authUser.role,
+  });
 
   return (
     <div className="min-h-screen bg-slate-50 w-full overflow-x-hidden">
       {/* Dynamic Role-Aware Sidebar */}
-      <Sidebar userRole={userRole} activeEntity="ICON_TECH_PRO" allowedModules={allowedModules} />
+      <Sidebar userRole={userRole} userEmail={authUser.email} activeEntity="ICON_TECH_PRO" allowedModules={allowedModules} />
 
       {/* Main Container */}
       <div className="lg:pl-64 flex flex-col min-h-screen w-full min-w-0">
+        {isUatEnvironment && <UATReviewBanner user={authUser} />}
         {/* Top Header */}
         <Header
           userName={userName}
@@ -47,11 +60,19 @@ export default async function DashboardLayout({
           activeEntity="ICON_TECH_PRO"
         />
 
+        {/* Corporate MFA Enforcement & Grace Period Banner */}
+        <div className="mt-16 w-full">
+          <MfaGracePeriodBanner policy={mfaPolicy} />
+        </div>
+
         {/* Page Content Viewport */}
-        <main className="flex-1 mt-16 p-3 sm:p-5 lg:p-8 w-full min-w-0">
+        <main className="flex-1 p-3 sm:p-5 lg:p-8 w-full min-w-0">
           {isDemoMode && <DemoPresentationBar />}
           {children}
         </main>
+
+        {/* Global Real-Time Work Notification Toaster */}
+        <WorkNotificationToaster userRole={userRole} />
       </div>
     </div>
   );

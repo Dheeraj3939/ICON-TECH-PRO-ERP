@@ -5,7 +5,6 @@ import { requireAuth, requireRole, getAuthenticatedUser } from '@/lib/auth/sessi
 import { logAuditEvent } from '@/lib/audit/logger';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { createClient } from '@/lib/supabase/server';
 import type {
   EnterpriseDocument,
   DocumentCategory,
@@ -135,11 +134,13 @@ export async function getDocuments(filter?: DocumentFilter): Promise<EnterpriseD
   const store = getDocsStore();
   let results: EnterpriseDocument[] = [];
 
+  let dbLoaded = false;
+
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('enterprise_documents').select('*');
+      const admin = createAdminClient();
+      let query = admin.from('enterprise_documents').select('*');
 
       if (filter?.category) query = query.eq('category', filter.category);
       if (filter?.entity_type) query = query.eq('entity_type', filter.entity_type);
@@ -148,15 +149,16 @@ export async function getDocuments(filter?: DocumentFilter): Promise<EnterpriseD
       if (filter?.folder_path) query = query.like('folder_path', `${filter.folder_path}%`);
 
       const { data, error } = await query.order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         results = data as EnterpriseDocument[];
+        dbLoaded = true;
       }
     } catch {
       // In-memory fallback
     }
   }
 
-  if (results.length === 0) {
+  if (!dbLoaded) {
     results = [...store];
     if (filter?.category) results = results.filter((d) => d.category === filter.category);
     if (filter?.entity_type) results = results.filter((d) => d.entity_type === filter.entity_type);

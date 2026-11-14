@@ -37,6 +37,8 @@ export const quotationItemSchema = z.object({
   total_amount: z.coerce.number().min(0),
   is_custom: z.boolean().optional(),
   section_name: z.string().optional(),
+  supplier_reference: z.string().optional(),
+  internal_remarks: z.string().optional(),
 });
 
 export const quotationFormSchema = z.object({
@@ -57,10 +59,44 @@ export const quotationFormSchema = z.object({
   payment_terms: z.string().optional(),
   delivery_terms: z.string().optional(),
   terms_conditions: z.array(z.string()).optional(),
+  bank_details: z
+    .object({
+      bank_name: z.string(),
+      account_holder: z.string(),
+      account_number: z.string(),
+      ifsc_code: z.string(),
+      branch: z.string(),
+    })
+    .optional(),
   include_signature: z.boolean().default(true),
   notes: z.string().optional(),
-  quotation_format: z.enum(['STANDARD', 'DETAILED_PROJECT']).optional(),
+  quotation_format: z
+    .enum([
+      'STANDARD',
+      'HOME_THEATER',
+      'CONFERENCE_ROOM',
+      'CCTV',
+      'CCTV_SURVEILLANCE',
+      'NETWORKING',
+      'AV',
+      'AV_SOLUTION',
+      'AV_PROJECTOR',
+      'INTERACTIVE_DISPLAY',
+      'PRINTER_SOLUTION',
+      'LAPTOP_DESKTOP',
+      'SERVER_STORAGE',
+      'ACCESS_CONTROL',
+      'AUDIO_SYSTEM',
+      'AMC_SERVICE',
+      'CUSTOM_MIXED',
+      'CUSTOM_PROJECT',
+      'DETAILED_PROJECT',
+    ])
+    .optional(),
+  format_configuration: z.string().optional(),
   project_sections: z.array(z.any()).optional(),
+  is_gst_inclusive: z.boolean().optional(),
+  pricing_mode: z.enum(['EXCLUSIVE', 'INCLUSIVE']).optional(),
 });
 
 export type QuotationFormValues = z.infer<typeof quotationFormSchema>;

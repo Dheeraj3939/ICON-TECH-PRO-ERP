@@ -4,8 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:uat": "node ./scripts/uat-runner.mjs dev -p 3001",
     "build": "next build",
+    "build:uat": "node ./scripts/uat-runner.mjs build",
     "start": "next start",
+    "start:uat": "node ./scripts/uat-runner.mjs start -p 3001",
     "lint": "next lint"
   },
   "dependencies": {
@@ -14,12 +17,14 @@
     "@supabase/supabase-js": "^2.49.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.475.0",
-    "next": "15.1.7",
+    "next": "15.1.12",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.54.2",
     "tailwind-merge": "^3.0.1",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.2"
   },
   "devDependencies": {

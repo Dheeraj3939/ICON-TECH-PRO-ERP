@@ -1,14 +1,14 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { findByIdOrCode, isUuid, sanitizeSearchTerm, sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { INITIAL_INVOICES, INITIAL_PAYMENTS, INITIAL_ORDERS } from '@/lib/constants/erp-data';
 import { getNextInvoiceNumber, getNextPaymentNumber } from '@/lib/utils/sequence';
 import { getCustomers } from '@/lib/actions/customers';
 import { getSalesOrderById } from '@/lib/actions/orders';
-import { requireRole } from '@/lib/auth/session';
+import { requireRole, requireAuth } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { queueTallySync } from '@/lib/actions/tally';
 import type { Invoice, Payment, SalesOrder, AccountsAgingBucket, CustomerOutstandingSummary } from '@/types/erp';
@@ -29,8 +29,42 @@ function getInvoicesStore(): Invoice[] {
   return globalThis.__ICON_INVOICES__;
 }
 
-function isUUID(val?: string | null): boolean {
-  return Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+function hydrateInvoiceRow(row: any): Invoice {
+  const grandTotal = Number(row.grand_total) || 0;
+  const paidAmount = Number(row.paid_amount) || 0;
+  const balanceAmount =
+    row.balance_amount !== null && row.balance_amount !== undefined
+      ? Number(row.balance_amount)
+      : Math.max(0, Number((grandTotal - paidAmount).toFixed(2)));
+  return {
+    ...row,
+    grand_total: grandTotal,
+    paid_amount: paidAmount,
+    balance_amount: balanceAmount,
+    is_locked: Boolean(row.is_locked || row.financial_lock_status === 'LOCKED'),
+  } as Invoice;
+}
+
+async function findInvoiceRecord(idOrNumber: string): Promise<Invoice | null> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const row = await findByIdOrCode<any>(
+        admin,
+        'invoices',
+        idOrNumber,
+        'invoice_number',
+        '*, items:invoice_items(*)'
+      );
+      if (row) return hydrateInvoiceRow(row);
+      return null;
+    } catch (err) {
+      console.warn('Supabase findInvoiceRecord fallback:', err);
+    }
+  }
+
+  const store = getInvoicesStore();
+  return store.find((inv) => inv.id === idOrNumber || inv.invoice_number === idOrNumber) || null;
 }
 
 function getPaymentsStore(): Payment[] {
@@ -43,28 +77,35 @@ function getPaymentsStore(): Payment[] {
 export async function getInvoices(filters?: {
   status?: string;
   search?: string;
+  customer_id?: string;
 }): Promise<{ invoices: Invoice[]; total: number; totalReceivables: number; totalCollected: number }> {
+  await requireAuth();
   const store = getInvoicesStore();
 
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('invoices').select('*, items:invoice_items(*)', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('invoices').select('*, items:invoice_items(*)', { count: 'exact' });
 
       if (filters?.status && filters.status !== 'ALL') {
         query = query.eq('status', filters.status);
       }
+      if (filters?.customer_id) {
+        query = query.eq('customer_id', filters.customer_id);
+      }
       if (filters?.search) {
-        const s = filters.search.trim();
-        query = query.or(`invoice_number.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+        const s = sanitizeSearchTerm(filters.search);
+        if (s) {
+          query = query.or(`invoice_number.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+        }
       }
 
       query = query.order('created_at', { ascending: false });
       const { data, error } = await query;
 
       if (!error && data) {
-        const list = data as Invoice[];
+        const list = data.map(hydrateInvoiceRow);
         const totalReceivables = list.reduce((sum, inv) => sum + (inv.balance_amount || 0), 0);
         const totalCollected = list.reduce((sum, inv) => sum + (inv.paid_amount || 0), 0);
         return { invoices: list, total: list.length, totalReceivables, totalCollected };
@@ -78,6 +119,9 @@ export async function getInvoices(filters?: {
 
   if (filters?.status && filters.status !== 'ALL') {
     list = list.filter((inv) => inv.status === filters.status);
+  }
+  if (filters?.customer_id) {
+    list = list.filter((inv) => inv.customer_id === filters.customer_id);
   }
   if (filters?.search) {
     const s = filters.search.toLowerCase();
@@ -96,14 +140,15 @@ export async function getInvoices(filters?: {
 }
 
 export async function getPayments(): Promise<{ payments: Payment[]; total: number }> {
+  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
   const store = getPaymentsStore();
 
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      const { data, error } = await supabase.from('payments').select('*').order('payment_date', { ascending: false });
-      if (!error && data && data.length > 0) {
+      const admin = createAdminClient();
+      const { data, error } = await admin.from('payments').select('*').order('payment_date', { ascending: false });
+      if (!error && data) {
         return { payments: data as Payment[], total: data.length };
       }
     } catch (err) {
@@ -129,10 +174,8 @@ export async function recordPayment(
     const invoicesStore = getInvoicesStore();
     const paymentsStore = getPaymentsStore();
 
-    // 2. Locate target invoice
-    const inv = invoicesStore.find(
-      (i) => i.id === payload.invoice_id || i.invoice_number === payload.invoice_number
-    );
+    // 2. Locate target invoice (DB-first)
+    const inv = await findInvoiceRecord(payload.invoice_id || payload.invoice_number || '');
     if (!inv) {
       return { success: false, error: 'Target invoice not found in active records.' };
     }
@@ -141,10 +184,11 @@ export async function recordPayment(
     if (payload.amount <= 0) {
       return { success: false, error: 'Payment amount must be greater than zero.' };
     }
-    if (payload.amount > inv.balance_amount) {
+    const currentBalance = Math.max(0, Number(((inv.grand_total || 0) - (inv.paid_amount || 0)).toFixed(2)));
+    if (payload.amount > currentBalance) {
       return {
         success: false,
-        error: `Payment exceeds outstanding invoice balance. Outstanding balance is ₹${inv.balance_amount.toLocaleString('en-IN')}`,
+        error: `Payment exceeds outstanding invoice balance. Outstanding balance is ₹${currentBalance.toLocaleString('en-IN')}`,
       };
     }
 
@@ -173,6 +217,13 @@ export async function recordPayment(
     inv.balance_amount = Math.max(0, Number((inv.grand_total - inv.paid_amount).toFixed(2)));
     inv.status = inv.balance_amount === 0 ? 'Paid' : 'Partially Paid';
 
+    const cachedInv = invoicesStore.find((i) => i.id === inv.id || i.invoice_number === inv.invoice_number);
+    if (cachedInv && cachedInv !== inv) {
+      cachedInv.paid_amount = inv.paid_amount;
+      cachedInv.balance_amount = inv.balance_amount;
+      cachedInv.status = inv.status;
+    }
+
     paymentsStore.unshift(payment);
 
     // 6. Persist to Supabase if available
@@ -180,21 +231,31 @@ export async function recordPayment(
     if (isOnline) {
       try {
         const admin = createAdminClient();
-        await admin.from('payments').insert([
-          {
-            payment_number: payNumber,
-            invoice_number: inv.invoice_number,
-            customer_name: payment.customer_name,
-            company_name: payment.company_name || null,
-            payment_date: payment.payment_date,
-            amount: payment.amount,
-            mode: payment.mode,
-            reference_number: payment.reference_number,
-            bank_name: payment.bank_name || null,
-            recorded_by_name: authUser.name,
-            notes: payment.notes || null,
-          },
-        ]);
+        const { data: insertedPay } = await admin
+          .from('payments')
+          .insert([
+            {
+              payment_number: payNumber,
+              invoice_id: sanitizeUuid(inv.id),
+              invoice_number: inv.invoice_number,
+              customer_id: sanitizeUuid(inv.customer_id),
+              customer_name: payment.customer_name,
+              company_name: payment.company_name || null,
+              payment_date: payment.payment_date,
+              amount: payment.amount,
+              mode: payment.mode,
+              reference_number: payment.reference_number,
+              bank_name: payment.bank_name || null,
+              recorded_by_name: authUser.name,
+              notes: payment.notes || null,
+            },
+          ])
+          .select('id')
+          .single();
+
+        if (insertedPay?.id) {
+          payment.id = insertedPay.id;
+        }
 
         await admin
           .from('invoices')
@@ -202,7 +263,7 @@ export async function recordPayment(
             paid_amount: inv.paid_amount,
             status: inv.status,
           })
-          .or(`id.eq.${inv.id},invoice_number.eq.${inv.invoice_number}`);
+          .eq('id', inv.id);
       } catch (err) {
         console.warn('Supabase payment recording failed:', err);
       }
@@ -215,8 +276,20 @@ export async function recordPayment(
       details: `Recorded payment ${payNumber} of ₹${payload.amount} against Invoice ${inv.invoice_number} (New Balance: ₹${inv.balance_amount})`,
     });
 
+    try {
+      await queueTallySync({
+        entity_type: 'PAYMENT',
+        entity_id: payment.id,
+        entity_number: payNumber,
+        tally_voucher_type: 'Receipt',
+        payload_summary: `Receipt Voucher from ${payment.customer_name} against ${inv.invoice_number} - ₹${payment.amount} (${payment.mode})`,
+      });
+    } catch (tallyErr) {
+      console.warn('Tally payment auto-queue notice:', tallyErr);
+    }
+
     revalidatePath('/dashboard/invoices');
-    revalidatePath('/dashboard/payments');
+    revalidatePath('/dashboard/tally');
     revalidatePath('/dashboard');
     return { success: true, data: payment };
   } catch (err) {
@@ -374,15 +447,15 @@ export async function createInvoiceFromOrder(
           created_by_name: authUser.name,
         };
 
-        if (isUUID(order.id)) {
+        if (isUuid(order.id)) {
           invoicePayload.order_id = order.id;
         }
         if (order.order_number) {
           invoicePayload.order_number = order.order_number;
         }
-        if (customer && isUUID(customer.id)) {
+        if (customer && isUuid(customer.id)) {
           invoicePayload.customer_id = customer.id;
-        } else if (isUUID(order.customer_id)) {
+        } else if (isUuid(order.customer_id)) {
           invoicePayload.customer_id = order.customer_id;
         }
 
@@ -406,6 +479,13 @@ export async function createInvoiceFromOrder(
             total_amount: item.total_amount,
           }));
           await admin.from('invoice_items').insert(itemsPayload);
+
+          if (isUuid(order.id)) {
+            await admin
+              .from('sales_orders')
+              .update({ invoice_id: createdInv.id })
+              .eq('id', order.id);
+          }
         }
       } catch (dbErr) {
         console.warn('Supabase invoice insertion failed:', dbErr);
@@ -432,6 +512,27 @@ export async function createInvoiceFromOrder(
       console.warn('Tally auto-queue notice:', tallyErr);
     }
 
+    // Auto-enqueue Tax Invoice email dispatch
+    if (customer?.email) {
+      try {
+        const { enqueueAutomatedEmail, processEmailQueue } = await import('@/lib/actions/email-automation');
+        await enqueueAutomatedEmail({
+          trigger_type: 'TAX_INVOICE',
+          recipient_type: 'CUSTOMER',
+          recipient_email: customer.email,
+          recipient_name: invoice.customer_name,
+          entity_type: 'INVOICE',
+          entity_id: invoice.id,
+          entity_number: invoice.invoice_number,
+          custom_subject: `GST Tax Invoice ${invoice.invoice_number} - ICON TECH PRO`,
+          custom_body: `<p>Dear Accounts Team / ${invoice.customer_name},</p><p>Please find attached our official GST Tax Invoice <strong>${invoice.invoice_number}</strong>.</p><p>Invoice Total: <strong>₹${Number(invoice.grand_total).toLocaleString('en-IN')}</strong></p><p><strong>Bank Remittance Details:</strong><br>Bank: IDBI Bank (Bandri Complex, Hyderabad)<br>Account Holder: ICON TECH PRO<br>Account Number: 0426653800000161<br>IFSC Code: IBKL0000426</p><p>Regards,<br><strong>ICON TECH PRO Finance & Billing Division</strong></p>`,
+        });
+        processEmailQueue().catch(() => {});
+      } catch (emErr) {
+        console.warn('Invoice automated email trigger warning:', emErr);
+      }
+    }
+
     revalidatePath('/dashboard/invoices');
     revalidatePath('/dashboard/sales-orders');
     revalidatePath('/dashboard/tally');
@@ -454,8 +555,7 @@ export async function approveInvoice(
 ): Promise<{ success: boolean; data?: Invoice; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
-    const invoicesStore = getInvoicesStore();
-    const invoice = invoicesStore.find((inv) => inv.id === invoiceId || inv.invoice_number === invoiceId);
+    const invoice = await findInvoiceRecord(invoiceId);
     if (!invoice) {
       return { success: false, error: 'Invoice not found' };
     }
@@ -474,12 +574,8 @@ export async function approveInvoice(
         const admin = createAdminClient();
         await admin
           .from('invoices')
-          .update({
-            approval_status: 'APPROVED',
-            approved_by: authUser.name,
-            approved_at: nowIso,
-          })
-          .or(`id.eq.${invoice.id},invoice_number.eq.${invoice.invoice_number}`);
+          .update({ status: invoice.status === 'Paid' ? 'Paid' : invoice.status })
+          .eq('id', invoice.id);
       } catch (err) {
         console.warn('Supabase approveInvoice fallback:', err);
       }
@@ -508,8 +604,7 @@ export async function postInvoice(
 ): Promise<{ success: boolean; data?: Invoice; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
-    const invoicesStore = getInvoicesStore();
-    const invoice = invoicesStore.find((inv) => inv.id === invoiceId || inv.invoice_number === invoiceId);
+    const invoice = await findInvoiceRecord(invoiceId);
     if (!invoice) {
       return { success: false, error: 'Invoice not found' };
     }
@@ -522,22 +617,6 @@ export async function postInvoice(
     invoice.is_posted = true;
     invoice.posted_at = nowIso;
     invoice.posted_by = authUser.name;
-
-    if (await isSupabaseAvailable()) {
-      try {
-        const admin = createAdminClient();
-        await admin
-          .from('invoices')
-          .update({
-            is_posted: true,
-            posted_at: nowIso,
-            posted_by: authUser.name,
-          })
-          .or(`id.eq.${invoice.id},invoice_number.eq.${invoice.invoice_number}`);
-      } catch (err) {
-        console.warn('Supabase postInvoice fallback:', err);
-      }
-    }
 
     await logAuditEvent({
       userName: authUser.name,
@@ -562,8 +641,7 @@ export async function lockInvoice(
 ): Promise<{ success: boolean; data?: Invoice; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
-    const invoicesStore = getInvoicesStore();
-    const invoice = invoicesStore.find((inv) => inv.id === invoiceId || inv.invoice_number === invoiceId);
+    const invoice = await findInvoiceRecord(invoiceId);
     if (!invoice) {
       return { success: false, error: 'Invoice not found' };
     }
@@ -579,11 +657,11 @@ export async function lockInvoice(
         await admin
           .from('invoices')
           .update({
-            is_locked: true,
+            financial_lock_status: 'LOCKED',
             locked_at: nowIso,
             locked_by: authUser.name,
           })
-          .or(`id.eq.${invoice.id},invoice_number.eq.${invoice.invoice_number}`);
+          .eq('id', invoice.id);
       } catch (err) {
         console.warn('Supabase lockInvoice fallback:', err);
       }
@@ -616,6 +694,7 @@ export async function getAccountsAging(basis: 'invoice_date' | 'due_date' = 'inv
   totalOverdue: number;
 }> {
   try {
+    await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
     const { invoices } = await getInvoices({ status: 'ALL' });
     const outstandingInvoices = invoices.filter(
       (inv) => (inv.balance_amount || 0) > 0 && inv.status !== 'Paid'
@@ -693,6 +772,7 @@ export async function getCustomerOutstandingBalance(customerIdOrName?: string): 
   totalReceivables: number;
 }> {
   try {
+    await requireAuth();
     const { invoices } = await getInvoices({ status: 'ALL' });
     const todayStr = new Date().toISOString().split('T')[0];
 

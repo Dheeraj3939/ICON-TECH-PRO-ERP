@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   X,
   Building2,
@@ -16,9 +17,16 @@ import {
   AlertTriangle,
   Loader2,
   ShieldCheck,
+  Plus,
+  Trash2,
+  Copy,
+  Users,
+  Eye,
 } from 'lucide-react';
 import { createCustomer, updateCustomer, getSalespeopleList, checkCustomerDuplicate } from '@/lib/actions/customers';
-import type { Customer, CustomerType } from '@/types/customer';
+import { getCurrentSessionUser } from '@/lib/actions/users';
+import { ENQUIRY_SOURCES, isCanonicalEnquirySource } from '@/lib/constants/customer-source';
+import type { Customer, CustomerType, CustomerContact, CustomerShippingAddress } from '@/types/customer';
 
 interface CustomerFormModalProps {
   isOpen: boolean;
@@ -33,11 +41,27 @@ export function CustomerFormModal({
   onSuccess,
   editCustomer,
 }: CustomerFormModalProps) {
+  const router = useRouter();
   const [customerType, setCustomerType] = useState<CustomerType>('COMPANY');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sameAsBilling, setSameAsBilling] = useState(true);
   const [salespeople, setSalespeople] = useState<Array<{ id: string; name: string; role: string }>>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  // Multiple Contacts Support
+  const [additionalContacts, setAdditionalContacts] = useState<CustomerContact[]>([]);
+
+  // Multiple Shipping Addresses Support
+  const [shippingAddresses, setShippingAddresses] = useState<CustomerShippingAddress[]>([]);
+
+  // Structured Internal Notes
+  const [customerNotes, setCustomerNotes] = useState('');
+  const [requirementSummary, setRequirementSummary] = useState('');
+  const [importantInternalInfo, setImportantInternalInfo] = useState('');
+
+  // Confirmation Modal State
+  const [createdConfirmation, setCreatedConfirmation] = useState<Customer | null>(null);
 
   // Duplicate Warning State
   const [duplicateWarning, setDuplicateWarning] = useState<{
@@ -76,15 +100,19 @@ export function CustomerFormModal({
   const [nodalOfficer, setNodalOfficer] = useState('');
   const [paymentTermsDays, setPaymentTermsDays] = useState('30');
 
-  // Load Salespeople
+  // Load Current Session User & Salespeople
   useEffect(() => {
-    getSalespeopleList().then((list) => {
-      setSalespeople(list);
-      if (!salespersonId && list.length > 0) {
-        setSalespersonId(list[0].id);
+    getCurrentSessionUser().then((u) => {
+      setCurrentUser(u);
+      if (u?.id && !editCustomer) {
+        setSalespersonId(u.id);
       }
     });
-  }, []);
+
+    getSalespeopleList().then((list) => {
+      setSalespeople(list);
+    });
+  }, [editCustomer]);
 
   // Live Duplicate Detection (Phone, Email, GSTIN)
   useEffect(() => {
@@ -183,6 +211,11 @@ export function CustomerFormModal({
       setEmdAmount(editCustomer.emd_amount?.toString() || '0');
       setNodalOfficer(editCustomer.nodal_officer || '');
       setPaymentTermsDays(editCustomer.payment_terms_days?.toString() || '30');
+      setAdditionalContacts(editCustomer.contacts && editCustomer.contacts.length > 1 ? editCustomer.contacts.slice(1) : []);
+      setShippingAddresses(editCustomer.shipping_addresses || []);
+      setCustomerNotes(editCustomer.internal_notes?.general_notes || editCustomer.notes || '');
+      setRequirementSummary(editCustomer.internal_notes?.requirement_summary || '');
+      setImportantInternalInfo(editCustomer.internal_notes?.internal_commercial_info || '');
     } else {
       resetForm();
     }
@@ -219,6 +252,12 @@ export function CustomerFormModal({
     setEmdAmount('0');
     setNodalOfficer('');
     setPaymentTermsDays('30');
+    setAdditionalContacts([]);
+    setShippingAddresses([]);
+    setCustomerNotes('');
+    setRequirementSummary('');
+    setImportantInternalInfo('');
+    setCreatedConfirmation(null);
   }
 
   if (!isOpen) return null;
@@ -245,6 +284,16 @@ export function CustomerFormModal({
     }
     if (isCompany && !contactPerson.trim()) {
       setErrorMsg('Contact Person is required for B2B customers.');
+      setIsSubmitting(false);
+      return;
+    }
+    if (isCompany && !designation.trim()) {
+      setErrorMsg('Designation is required for Company / B2B customers.');
+      setIsSubmitting(false);
+      return;
+    }
+    if (isCompany && (!email.trim() || !email.includes('@'))) {
+      setErrorMsg('A valid Corporate Email Address is required for Company / B2B customers.');
       setIsSubmitting(false);
       return;
     }
@@ -279,6 +328,13 @@ export function CustomerFormModal({
       return;
     }
 
+    const compiledNotes = [
+      customerNotes.trim() ? `Customer Notes: ${customerNotes.trim()}` : '',
+      requirementSummary.trim() ? `Requirement Summary: ${requirementSummary.trim()}` : '',
+      importantInternalInfo.trim() ? `Internal Confidential: ${importantInternalInfo.trim()}` : '',
+      notes.trim(),
+    ].filter(Boolean).join('\n---\n');
+
     const payload: any = {
       customer_type: customerType,
       customer_name: (isCompany || isGovt) ? companyName.trim() : customerName.trim(),
@@ -309,7 +365,32 @@ export function CustomerFormModal({
       enquiry_source: enquirySource,
       salesperson_id: salespersonId || undefined,
       status: status,
-      notes: notes.trim() || undefined,
+      notes: compiledNotes || undefined,
+      contacts: [
+        {
+          name: (isCompany || isGovt) ? (contactPerson.trim() || nodalOfficer.trim()) : customerName.trim(),
+          designation: designation.trim() || undefined,
+          phone: phone.trim(),
+          email: email.trim() || undefined,
+          is_primary: true,
+        },
+        ...additionalContacts,
+      ],
+      shipping_addresses: shippingAddresses.length > 0 ? shippingAddresses : [
+        {
+          label: 'Primary Delivery Address',
+          address_line1: (sameAsBilling ? billingAddress.trim() : shippingAddress.trim()) || billingAddress.trim() || 'Hyderabad',
+          city: city.trim(),
+          state: state.trim(),
+          pincode: pincode.trim(),
+          is_default: true,
+        },
+      ],
+      internal_notes: {
+        general_notes: customerNotes.trim(),
+        requirement_summary: requirementSummary.trim(),
+        internal_commercial_info: importantInternalInfo.trim(),
+      },
     };
 
     if (editCustomer) {
@@ -325,12 +406,110 @@ export function CustomerFormModal({
       const res = await createCustomer(payload);
       setIsSubmitting(false);
       if (res.success && res.customer) {
-        onSuccess(res.customer);
-        onClose();
+        setCreatedConfirmation(res.customer);
       } else {
         setErrorMsg(res.error || 'Failed to create customer');
       }
     }
+  }
+
+  if (createdConfirmation) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+        <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in zoom-in-95">
+          <div className="p-8 text-center bg-gradient-to-b from-emerald-50/50 to-white">
+            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm border border-emerald-200">
+              <CheckCircle2 className="w-9 h-9" />
+            </div>
+            <span className="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full uppercase tracking-wider mb-2">
+              Customer Master Created
+            </span>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight mb-1">
+              {createdConfirmation.company_name || createdConfirmation.customer_name}
+            </h3>
+            <p className="text-xs text-slate-500 mb-6">
+              Assigned Unique Permanent ERP Identification Code
+            </p>
+
+            {/* Code Box */}
+            <div className="bg-slate-900 text-white rounded-2xl p-4 mb-6 shadow-inner flex items-center justify-between">
+              <div className="text-left">
+                <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                  ERP Customer ID
+                </div>
+                <div className="text-xl font-mono font-bold tracking-widest text-brand-400">
+                  {createdConfirmation.customer_code}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(createdConfirmation.customer_code);
+                }}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition border border-slate-700"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy</span>
+              </button>
+            </div>
+
+            {/* Summary Details */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-left text-xs space-y-2 mb-6">
+              <div className="flex justify-between text-slate-600">
+                <span className="font-medium">Primary Contact:</span>
+                <span className="font-semibold text-slate-800">
+                  {createdConfirmation.contact_person || createdConfirmation.customer_name}
+                </span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span className="font-medium">Phone:</span>
+                <span className="font-mono text-slate-800">{createdConfirmation.phone}</span>
+              </div>
+              {createdConfirmation.email && (
+                <div className="flex justify-between text-slate-600">
+                  <span className="font-medium">Email:</span>
+                  <span className="text-slate-800">{createdConfirmation.email}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-slate-600">
+                <span className="font-medium">Type:</span>
+                <span className="font-semibold text-slate-800">{createdConfirmation.customer_type}</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const customer = createdConfirmation;
+                  setCreatedConfirmation(null);
+                  onSuccess(customer);
+                  onClose();
+                  router.push(`/dashboard/customers/${customer.id}`);
+                }}
+                className="flex-1 py-3 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center gap-2 transition"
+              >
+                <Eye className="w-4 h-4" />
+                <span>View Customer 360</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const customer = createdConfirmation;
+                  setCreatedConfirmation(null);
+                  onSuccess(customer);
+                  onClose();
+                }}
+                className="py-3 px-5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -589,7 +768,7 @@ export function CustomerFormModal({
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Designation / Role
+                    Designation / Role <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -597,6 +776,7 @@ export function CustomerFormModal({
                     onChange={(e) => setDesignation(e.target.value)}
                     placeholder="e.g. Procurement Manager"
                     className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition"
+                    required
                   />
                 </div>
               </div>
@@ -655,7 +835,7 @@ export function CustomerFormModal({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Email Address
+                Corporate Email Address {customerType === 'COMPANY' && <span className="text-rose-500">*</span>}
               </label>
               <input
                 type="email"
@@ -663,8 +843,115 @@ export function CustomerFormModal({
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="billing@example.com"
                 className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition"
+                required={customerType === 'COMPANY'}
               />
             </div>
+          </div>
+
+          {/* Multiple Contacts Section */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-brand-600" />
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  Additional Contacts ({additionalContacts.length})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdditionalContacts([
+                    ...additionalContacts,
+                    { name: '', designation: '', phone: '', email: '', is_primary: false },
+                  ]);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 transition shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Contact</span>
+              </button>
+            </div>
+
+            {additionalContacts.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">No additional contacts added. Click &ldquo;Add Contact&rdquo; to add site engineers, procurement leads, or accounts POCs.</p>
+            ) : (
+              <div className="space-y-3">
+                {additionalContacts.map((contact, idx) => (
+                  <div key={idx} className="p-3 bg-white border border-slate-200 rounded-xl space-y-2 relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdditionalContacts(additionalContacts.filter((_, i) => i !== idx));
+                      }}
+                      className="absolute top-2 right-2 p-1 text-slate-400 hover:text-rose-600 rounded-md transition"
+                      title="Remove Contact"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pr-6">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Name</label>
+                        <input
+                          type="text"
+                          value={contact.name}
+                          onChange={(e) => {
+                            const updated = [...additionalContacts];
+                            updated[idx].name = e.target.value;
+                            setAdditionalContacts(updated);
+                          }}
+                          placeholder="Contact Name"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Designation</label>
+                        <input
+                          type="text"
+                          value={contact.designation || ''}
+                          onChange={(e) => {
+                            const updated = [...additionalContacts];
+                            updated[idx].designation = e.target.value;
+                            setAdditionalContacts(updated);
+                          }}
+                          placeholder="Role / Title"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Mobile</label>
+                        <input
+                          type="tel"
+                          value={contact.phone}
+                          onChange={(e) => {
+                            const updated = [...additionalContacts];
+                            updated[idx].phone = e.target.value.replace(/\D/g, '').slice(0, 10);
+                            setAdditionalContacts(updated);
+                          }}
+                          placeholder="10-digit Mobile"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Email</label>
+                        <input
+                          type="email"
+                          value={contact.email || ''}
+                          onChange={(e) => {
+                            const updated = [...additionalContacts];
+                            updated[idx].email = e.target.value;
+                            setAdditionalContacts(updated);
+                          }}
+                          placeholder="Email address"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Tax & Commercial Compliance */}
@@ -807,6 +1094,134 @@ export function CustomerFormModal({
             </div>
           </div>
 
+          {/* Multiple Shipping Addresses Section */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-brand-600" />
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  Additional Delivery / Site Addresses ({shippingAddresses.length})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShippingAddresses([
+                    ...shippingAddresses,
+                    {
+                      label: `Site / Branch ${shippingAddresses.length + 1}`,
+                      address_line1: '',
+                      city: 'Hyderabad',
+                      state: 'Telangana',
+                      pincode: '',
+                      is_default: false,
+                    },
+                  ]);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 transition shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Address</span>
+              </button>
+            </div>
+
+            {shippingAddresses.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">No secondary shipping addresses added. Default shipping address will be used for delivery orders.</p>
+            ) : (
+              <div className="space-y-3">
+                {shippingAddresses.map((addr, idx) => (
+                  <div key={idx} className="p-3 bg-white border border-slate-200 rounded-xl space-y-2 relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShippingAddresses(shippingAddresses.filter((_, i) => i !== idx));
+                      }}
+                      className="absolute top-2 right-2 p-1 text-slate-400 hover:text-rose-600 rounded-md transition"
+                      title="Remove Address"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pr-6">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Address Label</label>
+                        <input
+                          type="text"
+                          value={addr.label}
+                          onChange={(e) => {
+                            const updated = [...shippingAddresses];
+                            updated[idx].label = e.target.value;
+                            setShippingAddresses(updated);
+                          }}
+                          placeholder="e.g. Warehouse 2 / Site HQ"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                          required
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Address Line</label>
+                        <input
+                          type="text"
+                          value={addr.address_line1}
+                          onChange={(e) => {
+                            const updated = [...shippingAddresses];
+                            updated[idx].address_line1 = e.target.value;
+                            setShippingAddresses(updated);
+                          }}
+                          placeholder="Plot / Road / Area"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">City</label>
+                        <input
+                          type="text"
+                          value={addr.city}
+                          onChange={(e) => {
+                            const updated = [...shippingAddresses];
+                            updated[idx].city = e.target.value;
+                            setShippingAddresses(updated);
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">State</label>
+                        <input
+                          type="text"
+                          value={addr.state}
+                          onChange={(e) => {
+                            const updated = [...shippingAddresses];
+                            updated[idx].state = e.target.value;
+                            setShippingAddresses(updated);
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Pincode</label>
+                        <input
+                          type="text"
+                          maxLength={6}
+                          value={addr.pincode}
+                          onChange={(e) => {
+                            const updated = [...shippingAddresses];
+                            updated[idx].pincode = e.target.value.replace(/\D/g, '').slice(0, 6);
+                            setShippingAddresses(updated);
+                          }}
+                          placeholder="500081"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Operational Governance */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-100">
             <div>
@@ -818,23 +1233,35 @@ export function CustomerFormModal({
                 onChange={(e) => setEnquirySource(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
               >
-                <option value="Walk-in">Walk-in</option>
-                <option value="Referral">Referral</option>
-                <option value="Website">Website</option>
-                <option value="Cold Call">Cold Call</option>
-                <option value="Architect">Architect</option>
-                <option value="Existing Customer">Existing Customer</option>
+                {!isCanonicalEnquirySource(enquirySource) && Boolean(enquirySource) && (
+                  <option value={enquirySource}>
+                    {enquirySource} (Historical / Legacy)
+                  </option>
+                )}
+                {ENQUIRY_SOURCES.map((source) => (
+                  <option key={source} value={source}>
+                    {source}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Assigned Salesperson
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Assigned Salesperson
+                </label>
+                {currentUser?.role === 'Sales Executive' && (
+                  <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium border border-amber-200">
+                    Locked to you
+                  </span>
+                )}
+              </div>
               <select
                 value={salespersonId}
                 onChange={(e) => setSalespersonId(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                disabled={currentUser?.role === 'Sales Executive'}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
               >
                 {salespeople.map((sp) => (
                   <option key={sp.id} value={sp.id}>
@@ -860,18 +1287,53 @@ export function CustomerFormModal({
             </div>
           </div>
 
-          {/* Notes */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Internal Notes / Requirements Summary
-            </label>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Client interested in 4K Laser Projection & 7.1 surround sound setup"
-              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
+          {/* Internal Notes & Intelligence */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+              <FileText className="w-4 h-4 text-brand-600" />
+              <span>Internal Intelligence & Requirements</span>
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  1. Customer Background / Notes
+                </label>
+                <textarea
+                  rows={3}
+                  value={customerNotes}
+                  onChange={(e) => setCustomerNotes(e.target.value)}
+                  placeholder="Key relationship background, previous projects..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  2. Requirement Summary
+                </label>
+                <textarea
+                  rows={3}
+                  value={requirementSummary}
+                  onChange={(e) => setRequirementSummary(e.target.value)}
+                  placeholder="Products sought, AV specs, acoustic needs..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  3. Important Internal Info (Confidential)
+                </label>
+                <textarea
+                  rows={3}
+                  value={importantInternalInfo}
+                  onChange={(e) => setImportantInternalInfo(e.target.value)}
+                  placeholder="Payment habits, margin guidance, discount caps..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Footer Buttons */}

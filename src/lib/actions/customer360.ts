@@ -7,7 +7,7 @@ import { getEnquiries } from '@/lib/actions/enquiries';
 import { getSiteVisits, getInstallations } from '@/lib/actions/operations';
 import { getQuotations } from '@/lib/actions/quotations';
 import { getOrders } from '@/lib/actions/orders';
-import { getInvoices } from '@/lib/actions/billing';
+import { getInvoices, getPayments } from '@/lib/actions/billing';
 import { getSerialRecords } from '@/lib/actions/serials';
 import { getServiceTickets, getAMCContracts } from '@/lib/actions/services';
 import { getOutboxMessages } from '@/lib/actions/communication';
@@ -17,13 +17,17 @@ import { getApprovalRequests } from '@/lib/actions/approvals';
 import { getTallySyncQueue } from '@/lib/actions/tally';
 import { getCreditNotes, getCustomerReceivablesLedger } from '@/lib/actions/finance';
 import { getCustomerOpportunities } from '@/lib/actions/opportunities';
+import { getCustomerArchiveDocuments } from '@/lib/actions/signed-documents';
+import { getProjects } from '@/lib/actions/projects';
 
 import type { Customer } from '@/types/customer';
-import type { SiteVisitDetails } from '@/types/erp';
+import type { CustomerArchiveDocument } from '@/types/documents';
+import type { SiteVisitDetails, CustomerProject, Project } from '@/types/erp';
 import type {
   Quotation,
   SalesOrder,
   Invoice,
+  Payment,
   Installation,
   SerialRecord,
   ServiceTicket,
@@ -55,7 +59,8 @@ export interface CustomerTimelineEvent {
     | 'PROCUREMENT'
     | 'TASK'
     | 'APPROVAL'
-    | 'TALLY';
+    | 'TALLY'
+    | 'PROJECT_FILE';
   title: string;
   subtitle: string;
   timestamp: string;
@@ -72,6 +77,7 @@ export interface Customer360Dossier {
   quotations: Quotation[];
   orders: SalesOrder[];
   invoices: Invoice[];
+  payments?: Payment[];
   installations: Installation[];
   serials: SerialRecord[];
   tickets: ServiceTicket[];
@@ -84,6 +90,8 @@ export interface Customer360Dossier {
   creditNotes?: CreditNote[];
   receivablesSummary?: CustomerReceivableSummary;
   opportunities?: CustomerOpportunity[];
+  archiveDocuments?: CustomerArchiveDocument[];
+  projectFiles?: CustomerProject[];
   showCommercialCosts: boolean;
   timeline: CustomerTimelineEvent[];
   financialSummary: {
@@ -154,6 +162,7 @@ export async function getCustomer360Data(
       quoteRes,
       orderRes,
       invRes,
+      payRes,
       instRes,
       serialRes,
       ticketRes,
@@ -166,12 +175,15 @@ export async function getCustomer360Data(
       cnRes,
       recRes,
       oppRes,
+      archiveDocs,
+      projectsRes,
     ] = await Promise.all([
-      getEnquiries(),
+      getEnquiries({ customer_id: custId, search: customer.customer_name }),
       getSiteVisits(),
-      getQuotations(),
-      getOrders(),
-      getInvoices(),
+      getQuotations({ customer_id: custId, search: customer.customer_name }),
+      getOrders({ customer_id: custId, search: customer.customer_name }),
+      getInvoices({ customer_id: custId, search: customer.customer_name }),
+      getPayments(),
       getInstallations(),
       getSerialRecords(),
       getServiceTickets(),
@@ -184,11 +196,16 @@ export async function getCustomer360Data(
       getCreditNotes(),
       getCustomerReceivablesLedger(customer.id),
       getCustomerOpportunities(customer.id),
+      getCustomerArchiveDocuments(customer.id, customer.customer_name),
+      getProjects({ customer_id: custId }),
     ]);
 
     const creditNotes = (cnRes || []).filter((cn) => matchesCust(cn.customer_id, cn.customer_name));
     const receivablesSummary = (recRes.data || [])[0];
     const opportunities = oppRes.data || [];
+    const projectFiles: CustomerProject[] = (projectsRes?.projects || []).filter((p: CustomerProject) =>
+      matchesCust(p.customer_id, p.customer_name)
+    );
 
     const enquiries = (enqRes.enquiries || []).filter((e) =>
       matchesCust(e.customer_id, e.customer_name, e.company_name)
@@ -209,6 +226,10 @@ export async function getCustomer360Data(
 
     const invoices = (invRes.invoices || []).filter((inv) =>
       matchesCust(inv.customer_id, inv.customer_name)
+    );
+
+    const payments = (payRes?.payments || []).filter((p) =>
+      matchesCust(p.customer_id, p.customer_name, p.company_name)
     );
 
     const installations = (instRes || []).filter((inst) =>
@@ -323,6 +344,12 @@ export async function getCustomer360Data(
       }
     });
 
+    const totalReceipts = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    if (totalReceipts > totalCollected) {
+      totalCollected = totalReceipts;
+      balanceDue = Math.max(0, totalInvoiced - totalCollected);
+    }
+
     const creditLimit = customer.credit_limit || 0;
     const creditUtilizationPct = creditLimit > 0 ? Math.min(100, Math.round((balanceDue / creditLimit) * 100)) : 0;
 
@@ -425,6 +452,20 @@ export async function getCustomer360Data(
       });
     });
 
+    payments.forEach((p) => {
+      timeline.push({
+        id: `timeline-pay-${p.id}`,
+        type: 'PAYMENT',
+        title: `Payment Received: ₹${Number(p.amount).toLocaleString('en-IN')}`,
+        subtitle: `${p.mode || 'Bank Transfer'} (${p.reference_number || p.payment_number})`,
+        timestamp: p.payment_date,
+        amount: Number(p.amount),
+        status: 'Completed',
+        badge: 'Tally Inbound',
+        referenceCode: p.payment_number,
+      });
+    });
+
     tickets.forEach((t) => {
       timeline.push({
         id: `timeline-srv-${t.id}`,
@@ -490,6 +531,19 @@ export async function getCustomer360Data(
       });
     });
 
+    projectFiles.forEach((p) => {
+      timeline.push({
+        id: `timeline-proj-${p.id}`,
+        type: 'PROJECT_FILE',
+        title: `File ${p.file_id || p.project_code || p.id}: ${p.project_name || p.title || 'Customer Project'}`,
+        subtitle: `Sales: ${p.sales_status || p.status} • Fulfilment: ${p.fulfilment_status || 'Not Started'} • Financial: ${p.financial_status || 'No Financial Activity'}`,
+        timestamp: p.created_at,
+        status: p.status,
+        badge: p.department_owner ? `${p.department_owner}` : 'Open File',
+        referenceCode: p.file_id || p.project_code,
+      });
+    });
+
     // Sort timeline descending (most recent first)
     timeline.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
@@ -510,6 +564,7 @@ export async function getCustomer360Data(
       quotations,
       orders,
       invoices,
+      payments,
       installations,
       serials,
       tickets,
@@ -522,6 +577,8 @@ export async function getCustomer360Data(
       creditNotes,
       receivablesSummary,
       opportunities,
+      archiveDocuments: archiveDocs,
+      projectFiles,
       showCommercialCosts,
       timeline,
       financialSummary: {

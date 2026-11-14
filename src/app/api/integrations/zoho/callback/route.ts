@@ -20,12 +20,18 @@ export async function GET(request: NextRequest) {
   const {
     clientId,
     clientSecret,
-    redirectUri,
+    redirectUri: envRedirectUri,
     accountsUrl,
     apiUrl,
     hasClientId,
     hasClientSecret,
   } = getZohoOAuthCredentials();
+
+  const forwardedHost = (request.headers.get('x-forwarded-host') || request.headers.get('host') || '').split(',')[0].trim();
+  const isKnownCloudHost = /^(uat\.icontechpro\.in|erp\.icontechpro\.in|icon-erp-uat-web-production\.up\.railway\.app)$/i.test(forwardedHost);
+  const redirectUri = isKnownCloudHost
+    ? `https://${forwardedHost}/api/integrations/zoho/callback`
+    : envRedirectUri;
 
   let redirectOrigin: string;
   try {
@@ -163,7 +169,16 @@ export async function GET(request: NextRequest) {
 
     const grantedScopes = tokenData.scope
       ? tokenData.scope.split(/[\s,]+/).filter(Boolean)
-      : ['ZohoCRM.users.READ', 'ZohoCRM.org.READ'];
+      : [
+          'ZohoCRM.users.READ',
+          'ZohoCRM.org.READ',
+          'ZohoMail.organization.READ',
+          'ZohoMail.organization.accounts.READ',
+          'ZohoMail.accounts.READ',
+          'ZohoMail.messages.READ',
+          'ZohoMail.messages.CREATE',
+          'ZohoMail.messages.UPDATE',
+        ];
 
     await saveZohoOAuthTokens({
       refreshToken: tokenData.refresh_token,

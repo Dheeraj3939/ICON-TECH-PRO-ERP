@@ -101,11 +101,11 @@ export default function ReportsPage() {
     return {
       name,
       role: targetInfo.role,
-      deals: deals || (name === 'Dheeraj' ? 2 : name === 'Vineet Babu' ? 1 : 1),
-      revenue: revenue || (name === 'Dheeraj' ? 238218 : name === 'Vineet Babu' ? 108324 : 86848),
+      deals,
+      revenue,
       target: targetInfo.target,
       margin: `${targetInfo.targetMargin}%`,
-      progress: Math.min(100, Math.round(((revenue || (name === 'Dheeraj' ? 238218 : 108324)) / targetInfo.target) * 100)),
+      progress: Math.min(100, Math.round((revenue / targetInfo.target) * 100)),
     };
   });
 
@@ -136,15 +136,15 @@ export default function ReportsPage() {
   });
 
   const agingBuckets = [
-    { label: 'Current (0-15 Days)', amount: aging.current || 86392, color: 'bg-emerald-500' },
+    { label: 'Current (0-15 Days)', amount: aging.current, color: 'bg-emerald-500' },
     { label: '16-30 Days', amount: aging.bucket16_30, color: 'bg-blue-500' },
     { label: '31-60 Days', amount: aging.bucket31_60, color: 'bg-amber-500' },
     { label: '60+ Days Overdue', amount: aging.bucket60_plus, color: 'bg-rose-500' },
   ];
 
-  const totalQuoted = metrics?.totalQuotedValue || quotations.reduce((s, q) => s + (q.grand_total || 0), 0) || 1029904;
-  const totalOrders = metrics?.totalOrdersValue || orders.reduce((s, o) => s + (o.total_amount || 0), 0) || 433390;
-  const totalCollected = metrics?.totalCollected || invoices.reduce((s, i) => s + (i.paid_amount || 0), 0) || 262036;
+  const totalQuoted = metrics?.totalQuotedValue ?? quotations.reduce((s, q) => s + (q.grand_total || 0), 0);
+  const totalOrders = metrics?.totalOrdersValue ?? orders.reduce((s, o) => s + (o.total_amount || 0), 0);
+  const totalCollected = metrics?.totalCollected ?? invoices.reduce((s, i) => s + (i.paid_amount || 0), 0);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">

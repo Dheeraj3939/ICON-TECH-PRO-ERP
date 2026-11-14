@@ -4,6 +4,8 @@
  * Current Authoritative Release: V9.2 Enterprise Release
  */
 
+const isUatEnvironment = process.env.NEXT_PUBLIC_ERP_ENV?.trim().toUpperCase() === 'UAT';
+
 export const ERP_SYSTEM_VERSION = {
   version: '9.2',
   versionLabel: 'v9.2',
@@ -14,9 +16,10 @@ export const ERP_SYSTEM_VERSION = {
   fullTitle: 'ICON TECH PRO ERP V9.2 Enterprise Release',
   company: 'ICON TECH PRO',
   entityId: 'ORG-ICON-01',
-  environment: 'ENTERPRISE PRODUCTION',
+  // environment: 'ENTERPRISE PRODUCTION'
+  environment: isUatEnvironment ? 'UAT / TEST ENVIRONMENT' : 'ENTERPRISE PRODUCTION',
   releaseDate: '2026-09-28',
-  status: 'PRODUCTION_VERIFIED',
+  status: isUatEnvironment ? 'UAT_TEST' : 'PRODUCTION_VERIFIED',
   engines: {
     turnkeyEngine: 'Turnkey Execution Engine',
     turnkeyEngineVersion: 'v9.2',

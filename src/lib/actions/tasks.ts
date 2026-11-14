@@ -1,8 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { findByIdOrCode, isUuid } from '@/lib/supabase/db-helpers';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole, getAuthenticatedUser } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
@@ -88,17 +88,38 @@ export async function getTasks(filters?: {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('tasks').select('*', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('tasks').select('*', { count: 'exact' });
 
       if (filters?.status) query = query.eq('status', filters.status);
       if (filters?.task_type) query = query.eq('task_type', filters.task_type);
       if (filters?.related_entity_id) query = query.eq('related_entity_id', filters.related_entity_id);
 
       query = query.order('due_date', { ascending: true });
-      const { data, error, count } = await query;
-      if (!error && data && data.length > 0) {
-        return { tasks: data as ERPTask[], total: count ?? data.length };
+      const { data, error } = await query;
+      if (!error && data) {
+        let rows = data as ERPTask[];
+        if (filters?.scope === 'MY_TASKS' && authUser) {
+          rows = rows.filter(
+            (t) =>
+              t.assigned_user_name.toLowerCase() === authUser.name.toLowerCase() ||
+              t.assigned_user_id === authUser.id
+          );
+        } else if (filters?.scope === 'OVERDUE') {
+          rows = rows.filter((t) => t.due_date < todayStr && t.status !== 'Completed' && t.status !== 'Cancelled');
+        } else if (filters?.scope === 'TODAY') {
+          rows = rows.filter((t) => t.due_date === todayStr && t.status !== 'Completed' && t.status !== 'Cancelled');
+        } else if (filters?.scope === 'UPCOMING') {
+          rows = rows.filter((t) => t.due_date > todayStr && t.status !== 'Completed' && t.status !== 'Cancelled');
+        } else if (filters?.scope === 'COMPLETED') {
+          rows = rows.filter((t) => t.status === 'Completed');
+        }
+        if (filters?.assigned_user_name) {
+          rows = rows.filter(
+            (t) => t.assigned_user_name.toLowerCase() === filters.assigned_user_name!.toLowerCase()
+          );
+        }
+        return { tasks: rows, total: rows.length };
       }
     } catch (err) {
       console.warn('Supabase tasks query fallback to memory:', err);
@@ -141,6 +162,22 @@ export async function getTasks(filters?: {
   return { tasks: filtered, total: filtered.length };
 }
 
+async function findTaskRecord(taskId: string): Promise<ERPTask | null> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const row = await findByIdOrCode<ERPTask>(admin, 'tasks', taskId, 'task_number');
+      if (row) return row;
+      return null;
+    } catch (err) {
+      console.warn('Supabase findTaskRecord fallback:', err);
+    }
+  }
+
+  const store = getInternalTasksStore();
+  return store.find((t) => t.id === taskId || t.task_number === taskId) || null;
+}
+
 /**
  * Create an Automated Task / Follow-up.
  */
@@ -173,8 +210,8 @@ export async function createTask(payload: {
       id: `TSK-${Date.now()}`,
       task_number: taskNumber,
       task_type: payload.task_type,
-      related_entity_type: payload.related_entity_type,
-      related_entity_id: payload.related_entity_id,
+      related_entity_type: payload.related_entity_type || 'general',
+      related_entity_id: payload.related_entity_id || taskNumber,
       related_entity_number: payload.related_entity_number,
       title: payload.title,
       notes: payload.notes,
@@ -187,30 +224,37 @@ export async function createTask(payload: {
       created_at: new Date().toISOString(),
     };
 
-    store.unshift(task);
-
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin.from('tasks').insert({
-          id: task.id,
-          task_number: task.task_number,
-          task_type: task.task_type,
-          related_entity_type: task.related_entity_type || null,
-          related_entity_id: task.related_entity_id || null,
-          related_entity_number: task.related_entity_number || null,
-          title: task.title,
-          notes: task.notes || null,
-          assigned_user_name: task.assigned_user_name,
-          priority: task.priority,
-          due_date: task.due_date,
-          status: task.status,
-          created_by_name: task.created_by_name,
-        });
+        const { data: dbRow, error: insertErr } = await admin
+          .from('tasks')
+          .insert({
+            task_number: task.task_number,
+            task_type: task.task_type,
+            related_entity_type: task.related_entity_type || 'general',
+            related_entity_id: task.related_entity_id || task.task_number,
+            related_entity_number: task.related_entity_number || null,
+            title: task.title,
+            notes: task.notes || null,
+            assigned_user_name: task.assigned_user_name,
+            priority: task.priority,
+            due_date: task.due_date,
+            status: task.status,
+            created_by_name: task.created_by_name,
+          })
+          .select()
+          .single();
+
+        if (!insertErr && dbRow) {
+          task.id = dbRow.id;
+        }
       } catch (err) {
         console.warn('Supabase createTask fallback:', err);
       }
     }
+
+    store.unshift(task);
 
     await logAuditEvent({
       userName: authUser.name,
@@ -245,8 +289,7 @@ export async function updateTaskStatus(
       'Office Assistant',
     ]);
 
-    const store = getInternalTasksStore();
-    const found = store.find((t) => t.id === taskId || t.task_number === taskId);
+    const found = await findTaskRecord(taskId);
     if (!found) {
       return { success: false, error: 'Task record not found.' };
     }
@@ -259,19 +302,27 @@ export async function updateTaskStatus(
     }
     found.updated_at = new Date().toISOString();
 
+    const cachedTask = getInternalTasksStore().find((t) => t.id === found.id || t.task_number === found.task_number);
+    if (cachedTask && cachedTask !== found) {
+      Object.assign(cachedTask, found);
+    }
+
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin
+        const combinedNotes = outcome
+          ? `${found.notes ? `${found.notes}\n` : ''}[Outcome]: ${outcome}`
+          : found.notes || null;
+        const query = admin
           .from('tasks')
           .update({
             status: found.status,
-            outcome: found.outcome || null,
+            notes: combinedNotes,
             completed_by_name: found.completed_by_name || null,
             completed_at: found.completed_at || null,
             updated_at: found.updated_at,
-          })
-          .or(`id.eq.${taskId},task_number.eq.${taskId}`);
+          });
+        await (isUuid(found.id) ? query.eq('id', found.id) : query.eq('task_number', found.task_number));
       } catch (err) {
         console.warn('Supabase updateTaskStatus fallback:', err);
       }
@@ -317,8 +368,7 @@ export async function updateTask(
       'Office Assistant',
     ]);
 
-    const store = getInternalTasksStore();
-    const found = store.find((t) => t.id === taskId || t.task_number === taskId);
+    const found = await findTaskRecord(taskId);
     if (!found) {
       return { success: false, error: 'Task record not found.' };
     }
@@ -336,10 +386,15 @@ export async function updateTask(
     if (values.task_type !== undefined) found.task_type = values.task_type;
     found.updated_at = new Date().toISOString();
 
+    const cachedTask = getInternalTasksStore().find((t) => t.id === found.id || t.task_number === found.task_number);
+    if (cachedTask && cachedTask !== found) {
+      Object.assign(cachedTask, found);
+    }
+
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin
+        const query = admin
           .from('tasks')
           .update({
             title: found.title,
@@ -349,8 +404,8 @@ export async function updateTask(
             due_date: found.due_date,
             task_type: found.task_type,
             updated_at: found.updated_at,
-          })
-          .or(`id.eq.${taskId},task_number.eq.${taskId}`);
+          });
+        await (isUuid(found.id) ? query.eq('id', found.id) : query.eq('task_number', found.task_number));
       } catch (err) {
         console.warn('Supabase updateTask fallback:', err);
       }

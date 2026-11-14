@@ -90,10 +90,7 @@ function InstallationsContent() {
       setActionMessage(null);
       const res = await createInstallation({
         ...newIns,
-        installed_products: [
-          { product_name: 'Epson 4K Laser Projector', sku: 'EP-4K-980', quantity: 1 },
-          { product_name: 'Motorized Projection Screen 120"', sku: 'SCR-120-MOT', quantity: 1 },
-        ],
+        installed_products: [],
       });
 
       if (res.success && res.data) {
@@ -367,15 +364,18 @@ function InstallationsContent() {
             <div className="space-y-2">
               <span className="font-bold text-slate-800 text-xs block">Equipment to Commission:</span>
               <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
-                {(selectedJobCard.installed_products || [
-                  { product_name: 'Epson 4K Laser Projector', sku: 'EP-4K-980', quantity: 1 },
-                  { product_name: 'Motorized Projection Screen 120"', sku: 'SCR-120-MOT', quantity: 1 },
-                ]).map((p, idx) => (
-                  <div key={idx} className="p-2.5 flex items-center justify-between bg-white text-[11px]">
-                    <span className="font-medium text-slate-800">{p.product_name}</span>
-                    <span className="text-slate-500">{p.quantity} Unit(s)</span>
+                {(selectedJobCard.installed_products && selectedJobCard.installed_products.length > 0) ? (
+                  selectedJobCard.installed_products.map((p, idx) => (
+                    <div key={idx} className="p-2.5 flex items-center justify-between bg-white text-[11px]">
+                      <span className="font-medium text-slate-800">{p.product_name}</span>
+                      <span className="text-slate-500">{p.quantity} Unit(s)</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-3 bg-white text-[11px] text-slate-500 italic">
+                    No equipment line items attached to this job card.
                   </div>
-                ))}
+                )}
               </div>
             </div>
 

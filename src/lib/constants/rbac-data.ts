@@ -12,8 +12,8 @@ export const INITIAL_ROLES: AppRole[] = [
   },
   {
     id: 'ROLE_ADMIN',
-    role_name: 'Admin / BDM',
-    description: 'System administrator and senior business development manager with full operational control.',
+    role_name: 'Admin',
+    description: 'System administrator with full operational, IT governance, and system administration control.',
     is_system: true,
     user_count: 1,
     created_at: '2026-01-01T00:00:00Z',
@@ -52,80 +52,109 @@ export const INITIAL_ROLES: AppRole[] = [
   },
 ];
 
-export const INITIAL_MANAGED_USERS: ManagedUser[] = [
-  {
-    id: 'USR001',
-    name: 'B V Dheeraj Reddy',
-    email: 'dheeraj@icontechpro.in',
-    phone: '+91 80999 09921',
-    role: 'Admin / BDM',
-    status: 'ACTIVE',
-    can_login: true,
-    department: 'Administration & Sales',
-    designation: 'Sales Executive / Admin',
-    created_at: '2026-01-01T00:00:00Z',
-  },
-  {
-    id: 'USR002',
-    name: 'Borra Narsimulu',
-    email: 'icontechpro@gmail.com',
-    phone: '+91 80999 09997',
-    role: 'Managing Director',
-    status: 'ACTIVE',
-    can_login: true,
-    department: 'Executive Management',
-    designation: 'Managing Director',
-    created_at: '2026-01-01T00:00:00Z',
-  },
-  {
-    id: 'USR003',
-    name: 'B Vineet Babu',
-    email: 'vineet@icontechpro.in',
-    phone: '+91 80999 09918',
-    role: 'Sales Executive',
-    status: 'ACTIVE',
-    can_login: true,
-    department: 'Corporate Sales',
-    designation: 'Sales Executive',
-    created_at: '2026-01-01T00:00:00Z',
-  },
-  {
-    id: 'USR004',
-    name: 'Reshma',
-    email: 'sales@icontechpro.in',
-    phone: '+91 7569909997',
-    role: 'Sales Executive',
-    status: 'ACTIVE',
-    can_login: true,
-    department: 'Sales',
-    designation: 'Sales Executive',
-    created_at: '2026-01-01T00:00:00Z',
-  },
-  {
-    id: 'USR005',
-    name: 'Hemalath',
-    email: 'accounts@icontechpro.in',
-    phone: '+91 8099909920',
-    role: 'Accounts',
-    status: 'ACTIVE',
-    can_login: true,
-    department: 'Finance & Accounts',
-    designation: 'Accounts',
-    created_at: '2026-01-01T00:00:00Z',
-  },
-  {
-    id: 'USR006',
-    name: 'Manisha',
-    email: 'service01@icontechpro.in',
-    phone: '+91 8099909914',
-    role: 'Office Assistant',
-    status: 'ACTIVE',
-    can_login: true,
-    department: 'Office Administration',
-    designation: 'Office Assistant',
-    created_at: '2026-01-01T00:00:00Z',
-  },
-];
+const isUatEnvironment = process.env.NEXT_PUBLIC_ERP_ENV?.trim().toUpperCase() === 'UAT';
+
+export const INITIAL_MANAGED_USERS: ManagedUser[] = isUatEnvironment
+  ? [
+      {
+        id: 'USR001',
+        name: 'Bijjam Venkata Dheeraj Reddy',
+        email: 'dheeraj@icontechpro.in',
+        phone: '+91 80999 09921',
+        role: 'Admin',
+        status: 'ACTIVE',
+        can_login: true,
+        department: 'IT & Administration',
+        designation: 'System Administrator',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'USR002',
+        name: 'Borra Narsimulu',
+        email: 'icontechpro@gmail.com',
+        phone: '+91 80999 09997',
+        role: 'Managing Director',
+        status: 'ACTIVE',
+        can_login: true,
+        department: 'Executive Management',
+        designation: 'Managing Director',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'USR003',
+        name: 'B Vineet Babu',
+        email: 'vineet@icontechpro.in',
+        phone: '+91 80999 09918',
+        role: 'Sales Executive',
+        status: 'ACTIVE',
+        can_login: true,
+        department: 'Corporate Sales',
+        designation: 'Sales Executive',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'USR004',
+        name: 'Reshma',
+        email: 'sales@icontechpro.in',
+        phone: '+91 7569909997',
+        role: 'Sales Executive',
+        status: 'ACTIVE',
+        can_login: true,
+        department: 'Sales',
+        designation: 'Sales Executive',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'USR005',
+        name: 'Hemalath',
+        email: 'accounts@icontechpro.in',
+        phone: '+91 8099909920',
+        role: 'Accounts',
+        status: 'ACTIVE',
+        can_login: true,
+        department: 'Finance & Accounts',
+        designation: 'Accounts',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'USR006',
+        name: 'Manisha',
+        email: 'service01@icontechpro.in',
+        phone: '+91 8099909914',
+        role: 'Office Assistant',
+        status: 'ACTIVE',
+        can_login: true,
+        department: 'Office Administration',
+        designation: 'Office Assistant',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'USR007',
+        name: 'Synthetic BDM Lead (UAT)',
+        email: 'bdm-uat@example.invalid',
+        phone: '+91 8099909922',
+        role: 'BDM',
+        status: 'ACTIVE',
+        can_login: true,
+        department: 'Business Development',
+        designation: 'Business Development Manager',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ]
+  : [
+      {
+        id: 'USR001',
+        name: 'Bijjam Venkata Dheeraj Reddy',
+        email: 'dheeraj@icontechpro.in',
+        phone: '+91 80999 09921',
+        role: 'Admin',
+        status: 'ACTIVE',
+        can_login: true,
+        department: 'IT & Administration',
+        designation: 'System Administrator',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ];
 
 // Helper to construct full matrix
 function buildDefaultMatrix(): RolePermissionMatrix {
@@ -152,9 +181,14 @@ function buildDefaultMatrix(): RolePermissionMatrix {
     }
   }
 
-  // 2. Admin / BDM has full permissions across all operational and admin modules
+  // 2. Admin & Admin / BDM has full permissions across all operational and admin modules
+  if (!matrix['Admin']) matrix['Admin'] = {} as any;
+  if (!matrix['Admin / BDM']) matrix['Admin / BDM'] = {} as any;
   for (const mod of ALL_ERP_MODULES) {
+    if (!matrix['Admin'][mod]) matrix['Admin'][mod] = {} as any;
+    if (!matrix['Admin / BDM'][mod]) matrix['Admin / BDM'][mod] = {} as any;
     for (const act of ALL_PERMISSION_ACTIONS) {
+      matrix['Admin'][mod][act] = true;
       matrix['Admin / BDM'][mod][act] = true;
     }
   }

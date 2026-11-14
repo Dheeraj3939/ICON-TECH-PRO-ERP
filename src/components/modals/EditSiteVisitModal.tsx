@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Save, AlertTriangle, Calendar, User, MapPin } from 'lucide-react';
 import type { SiteVisitDetails } from '@/types/erp';
 import { updateSiteVisit } from '@/lib/actions/operations';
+import { SITE_VISIT_PROJECT_CATEGORIES, type SiteVisitProjectCategory } from '@/types/technical-evaluation';
 
 interface EditSiteVisitModalProps {
   isOpen: boolean;
@@ -20,11 +21,19 @@ export default function EditSiteVisitModal({
 }: EditSiteVisitModalProps) {
   const [formData, setFormData] = useState({
     scheduledDate: '',
+    scheduled_time: '11:00 AM',
     assignedTechnician: '',
+    project_category: 'Audio-Visual Solutions',
+    other_project_description: '',
+    contact_person: '',
+    contact_phone: '',
+    purpose: '',
     roomType: 'Home Theater',
     measurements: '',
     siteAddress: '',
     notes: '',
+    next_action: '',
+    follow_up_date: '',
     status: 'SCHEDULED' as 'SCHEDULED' | 'COMPLETED' | 'CANCELLED',
   });
 
@@ -35,11 +44,19 @@ export default function EditSiteVisitModal({
     if (visit) {
       setFormData({
         scheduledDate: visit.scheduledDate || new Date().toISOString().split('T')[0],
+        scheduled_time: visit.scheduled_time || '11:00 AM',
         assignedTechnician: visit.assignedTechnician || '',
+        project_category: visit.project_category || 'Audio-Visual Solutions',
+        other_project_description: visit.other_project_description || '',
+        contact_person: visit.contact_person || visit.customer_name || '',
+        contact_phone: visit.contact_phone || '',
+        purpose: visit.purpose || 'Site Inspection & Feasibility',
         roomType: visit.roomType || 'Home Theater',
         measurements: visit.measurements || '',
         siteAddress: visit.siteAddress || '',
         notes: visit.notes || '',
+        next_action: visit.next_action || '',
+        follow_up_date: visit.follow_up_date || '',
         status: (visit.status as any) || 'SCHEDULED',
       });
       setErrorMessage(null);
@@ -58,11 +75,19 @@ export default function EditSiteVisitModal({
       const res = await updateSiteVisit({
         visitId,
         scheduledDate: formData.scheduledDate,
+        scheduled_time: formData.scheduled_time,
         assignedTechnician: formData.assignedTechnician.trim(),
+        project_category: formData.project_category,
+        other_project_description: formData.project_category === 'Other Projects' ? formData.other_project_description : undefined,
+        contact_person: formData.contact_person,
+        contact_phone: formData.contact_phone,
+        purpose: formData.purpose,
         roomType: formData.roomType,
         measurements: formData.measurements.trim(),
         siteAddress: formData.siteAddress.trim(),
         notes: formData.notes.trim(),
+        next_action: formData.next_action.trim(),
+        follow_up_date: formData.follow_up_date,
         status: formData.status as any,
       });
 
@@ -121,6 +146,49 @@ export default function EditSiteVisitModal({
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 outline-none"
             />
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Project Category *</label>
+              <select
+                value={formData.project_category}
+                onChange={(e) => setFormData({ ...formData, project_category: e.target.value })}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 outline-none bg-white font-medium text-slate-800"
+              >
+                {SITE_VISIT_PROJECT_CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Contact Phone</label>
+              <input
+                type="tel"
+                value={formData.contact_phone}
+                onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })}
+                placeholder="e.g. 9849012345"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+          </div>
+
+          {formData.project_category === 'Other Projects' && (
+            <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200">
+              <label className="block font-semibold mb-1 text-amber-900 text-xs">
+                Other Project Description *
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.other_project_description}
+                onChange={(e) => setFormData({ ...formData, other_project_description: e.target.value })}
+                placeholder="Specify nature of project..."
+                className="w-full px-3 py-1.5 text-xs rounded-lg bg-white border border-amber-300 outline-none"
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -185,6 +253,28 @@ export default function EditSiteVisitModal({
               placeholder="e.g. 24ft L x 18ft W x 11ft H"
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 outline-none"
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Next Action</label>
+              <input
+                type="text"
+                value={formData.next_action}
+                onChange={(e) => setFormData({ ...formData, next_action: e.target.value })}
+                placeholder="e.g. Prepare BoM & Quotation"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Follow-up Date</label>
+              <input
+                type="date"
+                value={formData.follow_up_date}
+                onChange={(e) => setFormData({ ...formData, follow_up_date: e.target.value })}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
           </div>
 
           <div>

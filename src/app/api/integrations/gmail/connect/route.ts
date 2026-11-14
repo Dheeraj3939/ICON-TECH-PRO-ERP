@@ -19,12 +19,40 @@ const TARGET_ACCOUNT_EMAIL = 'icontechpro@gmail.com';
  * 5. Logs audit event and redirects browser to Google.
  */
 export async function GET(request: NextRequest) {
-  const baseRedirectUrl = new URL('/dashboard/settings/integrations', request.url);
+  // 0. Resolve credentials and safely determine browser redirect origin from configured redirectUri
+  const {
+    clientId,
+    clientSecret,
+    redirectUri: envRedirectUri,
+    hasClientId,
+    hasClientSecret,
+    isPlaceholder,
+  } = getGmailOAuthCredentials();
+
+  const forwardedHost = (request.headers.get('x-forwarded-host') || request.headers.get('host') || '').split(',')[0].trim();
+  const isKnownCloudHost = /^(uat\.icontechpro\.in|erp\.icontechpro\.in|icon-erp-uat-web-production\.up\.railway\.app)$/i.test(forwardedHost);
+  const redirectUri = isKnownCloudHost
+    ? `https://${forwardedHost}/api/integrations/gmail/callback`
+    : envRedirectUri;
+
+  let redirectOrigin: string;
+  try {
+    const parsedRedirect = new URL(redirectUri);
+    redirectOrigin = parsedRedirect.origin;
+  } catch {
+    redirectOrigin = process.env.NEXT_PUBLIC_SITE_URL || 'https://erp.icontechpro.in';
+  }
+
+  if (redirectOrigin.includes('0.0.0.0')) {
+    redirectOrigin = redirectOrigin.replace('0.0.0.0', 'localhost');
+  }
+
+  const baseRedirectUrl = new URL('/dashboard/settings/integrations', redirectOrigin);
 
   // 1. Verify User Authentication
   const user = await getAuthenticatedUser();
   if (!user) {
-    const loginUrl = new URL('/login', request.url);
+    const loginUrl = new URL('/login', redirectOrigin);
     loginUrl.searchParams.set('returnUrl', '/dashboard/settings/integrations');
     return NextResponse.redirect(loginUrl);
   }
@@ -41,16 +69,6 @@ export async function GET(request: NextRequest) {
     baseRedirectUrl.searchParams.set('error', 'unauthorized_role');
     return NextResponse.redirect(baseRedirectUrl);
   }
-
-  // 3. Verify Server Environment Credentials (with placeholder check)
-  const {
-    clientId,
-    clientSecret,
-    redirectUri,
-    hasClientId,
-    hasClientSecret,
-    isPlaceholder,
-  } = getGmailOAuthCredentials();
 
   if (isPlaceholder) {
     baseRedirectUrl.searchParams.set('error', 'placeholder_credentials');

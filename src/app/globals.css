@@ -52,15 +52,39 @@ body {
 
 /* Print Overrides for Quotations & Invoices */
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
   body {
     background: white !important;
     color: #000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
   aside, header, nav, .print\:hidden {
     display: none !important;
   }
   .ml-64 {
     margin-left: 0 !important;
+  }
+  .a4-page-sheet {
+    width: 210mm !important;
+    min-height: 297mm !important;
+    height: 297mm !important;
+    max-height: 297mm !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 12mm 15mm !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+  .a4-page-sheet:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
   }
 }
 

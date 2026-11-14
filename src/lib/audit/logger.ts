@@ -2,6 +2,7 @@ import { INITIAL_AUDIT_LOGS } from '@/lib/constants/erp-data';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { AuditLog } from '@/types/erp';
+import { logEnterpriseAudit, type AuditCategory } from './enterprise-logger';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -30,12 +31,31 @@ function resolveAuditTableName(module: string, action: string): string {
   return mod || 'system';
 }
 
+function mapToCategory(module: string, action: string): AuditCategory {
+  const act = action.toUpperCase();
+  const mod = module.toUpperCase();
+
+  if (act.startsWith('SECURITY_') || act.includes('AUTH') || act.includes('LOGIN') || act.includes('LOCK') || act.includes('MFA') || act.includes('PASSWORD')) {
+    return 'SECURITY_EVENT';
+  }
+  if (mod.includes('AUTOMATION') || mod.includes('REPORT') || mod.includes('SYSTEM') || mod.includes('INTEGRATION') || act.includes('CRON') || act.includes('SCHEDULED')) {
+    return 'SYSTEM_EVENT';
+  }
+  if (mod.includes('QUOTATION') || mod.includes('ORDER') || mod.includes('INVOICE') || mod.includes('CHALLAN') || mod.includes('PROFORMA') || mod.includes('CUSTOMER') || mod.includes('ENQUIRY') || mod.includes('BILLING')) {
+    return 'BUSINESS_AUDIT';
+  }
+  return 'EMPLOYEE_ACTIVITY';
+}
+
 export async function logAuditEvent(params: {
   userName: string;
   action: string;
   module: string;
   details: string;
   ipAddress?: string;
+  previousValues?: Record<string, any> | null;
+  newValues?: Record<string, any> | null;
+  reason?: string;
 }): Promise<AuditLog> {
   const store = getAuditLogsStore();
   const newLog: AuditLog = {
@@ -50,7 +70,25 @@ export async function logAuditEvent(params: {
 
   store.unshift(newLog);
 
-  // If Supabase is online, log to audit_logs table
+  // Synchronously record in the Enterprise Central Audit Ledger with SHA-256 chaining
+  try {
+    const category = mapToCategory(params.module, params.action);
+    await logEnterpriseAudit({
+      userName: params.userName,
+      category,
+      module: params.module,
+      action: params.action,
+      relatedContext: params.details,
+      previousValues: params.previousValues,
+      newValues: params.newValues,
+      reason: params.reason,
+      sourceIp: params.ipAddress || '127.0.0.1',
+    });
+  } catch (err) {
+    console.warn('logEnterpriseAudit bridging error:', err);
+  }
+
+  // If Supabase is online, log to legacy audit_logs table as well
   if (await isSupabaseAvailable()) {
     try {
       const admin = createAdminClient();

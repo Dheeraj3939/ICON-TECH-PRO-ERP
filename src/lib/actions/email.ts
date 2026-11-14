@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requireRole, getAuthenticatedUser } from '@/lib/auth/session';
+import { requireRole, requireAuth } from '@/lib/auth/session';
 import { EmailService } from '@/lib/email/email-service';
 import { getQuotationById } from '@/lib/actions/quotations';
 import { getInvoices } from '@/lib/actions/billing';
@@ -433,6 +433,6 @@ export async function sendIntegrationTestEmailAction(options?: {
  * Retrieve recent email logs for display in Settings & Integrations screens.
  */
 export async function getRecentEmailLogsAction(limit: number = 20): Promise<EmailLogRecord[]> {
-  await getAuthenticatedUser();
+  await requireAuth();
   return EmailService.getRecentEmailLogs(limit);
 }

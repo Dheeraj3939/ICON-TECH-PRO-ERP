@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Plus,
   Search,
@@ -33,15 +33,42 @@ import {
 import { INITIAL_QUOTATIONS } from '@/lib/constants/erp-data';
 import { PrintQuotationModal } from '@/components/modals/PrintQuotationModal';
 import { exportToCSV } from '@/lib/utils/export';
+import { getCurrentSessionUser } from '@/lib/actions/users';
+import { canExportCSV } from '@/lib/permissions/registry';
 import type { Quotation, QuotationStatus } from '@/types/erp';
+import type { AuthenticatedUser } from '@/lib/auth/session';
 
-export default function QuotationsRegisterPage() {
+function QuotationsRegisterContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
+  const urlSearch = searchParams?.get('search') || '';
+  const urlCustomer = searchParams?.get('customer_id') || searchParams?.get('customer_name') || '';
+  const urlStatus = searchParams?.get('status') || '';
+  const siteVisit = searchParams?.get('site_visit');
+  const enquiryId = searchParams?.get('enquiry_id');
+
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [quotations, setQuotations] = useState<Quotation[]>(INITIAL_QUOTATIONS);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [search, setSearch] = useState(urlSearch || urlCustomer || '');
+  const [statusFilter, setStatusFilter] = useState(urlStatus && urlStatus !== 'ALL' ? urlStatus : 'ALL');
   const [salespersonFilter, setSalespersonFilter] = useState('ALL');
+
+  useEffect(() => {
+    if (siteVisit || enquiryId) {
+      const q = searchParams ? searchParams.toString() : '';
+      router.replace(`/dashboard/quotations/new?${q}`);
+    }
+  }, [siteVisit, enquiryId, searchParams, router]);
+
+  useEffect(() => {
+    if (urlSearch || urlCustomer) {
+      setSearch(urlSearch || urlCustomer);
+    }
+    if (urlStatus && urlStatus !== 'ALL') {
+      setStatusFilter(urlStatus);
+    }
+  }, [urlSearch, urlCustomer, urlStatus]);
 
   const [selectedPrintQuote, setSelectedPrintQuote] = useState<Quotation | null>(null);
 
@@ -62,6 +89,10 @@ export default function QuotationsRegisterPage() {
   };
 
   useEffect(() => {
+    getCurrentSessionUser().then(setCurrentUser);
+  }, []);
+
+  useEffect(() => {
     loadData();
   }, [statusFilter, search]);
 
@@ -78,17 +109,22 @@ export default function QuotationsRegisterPage() {
   };
 
   const handleExportCSV = () => {
-    exportToCSV('ICON_Quotations_Register', quotations, [
-      { key: 'quotation_number', label: 'Quotation No.' },
-      { key: 'quotation_date', label: 'Date' },
-      { key: 'customer_name', label: 'Customer' },
-      { key: 'company_name', label: 'Company' },
-      { key: 'salesperson_name', label: 'Salesperson' },
-      { key: 'subtotal', label: 'Subtotal (₹)' },
-      { key: 'taxable_amount', label: 'Taxable (₹)' },
-      { key: 'grand_total', label: 'Grand Total (₹)' },
-      { key: 'status', label: 'Status' },
-    ]);
+    exportToCSV(
+      'ICON_Quotations_Register',
+      quotations,
+      [
+        { key: 'quotation_number', label: 'Quotation No.' },
+        { key: 'quotation_date', label: 'Date' },
+        { key: 'customer_name', label: 'Customer' },
+        { key: 'company_name', label: 'Company' },
+        { key: 'salesperson_name', label: 'Salesperson' },
+        { key: 'subtotal', label: 'Subtotal (₹)' },
+        { key: 'taxable_amount', label: 'Taxable (₹)' },
+        { key: 'grand_total', label: 'Grand Total (₹)' },
+        { key: 'status', label: 'Status' },
+      ],
+      currentUser?.role
+    );
   };
 
   const handleOpenRevisions = async (quote: Quotation) => {
@@ -171,14 +207,16 @@ export default function QuotationsRegisterPage() {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-2xs transition cursor-pointer"
-          >
-            <Download className="w-4 h-4 text-slate-500" />
-            <span>Export CSV</span>
-          </button>
+          {canExportCSV(currentUser?.role) && (
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-2xs transition cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
 
           <Link
             href="/dashboard/quotations/new"
@@ -352,14 +390,23 @@ export default function QuotationsRegisterPage() {
                       {/* Actions */}
                       <td className="py-3 px-3 align-top text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {/* View / Print */}
+                          {/* Dedicated View Page */}
+                          <Link
+                            href={`/dashboard/quotations/${q.id}`}
+                            title="View proposal details"
+                            className="p-1 rounded-md text-slate-600 hover:text-blue-700 hover:bg-blue-50 border border-slate-200 transition text-[11px] font-semibold"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-blue-600" />
+                          </Link>
+
+                          {/* View / Print Modal */}
                           <button
                             type="button"
                             onClick={() => setSelectedPrintQuote(q)}
                             title="Preview customer proposal"
                             className="p-1 rounded-md text-slate-600 hover:text-blue-700 hover:bg-blue-50 border border-slate-200 transition text-[11px] font-semibold cursor-pointer"
                           >
-                            <Printer className="w-3.5 h-3.5 text-blue-600" />
+                            <Printer className="w-3.5 h-3.5 text-slate-700" />
                           </button>
 
                           {/* Edit Full Page */}
@@ -370,6 +417,16 @@ export default function QuotationsRegisterPage() {
                           >
                             <Edit3 className="w-3.5 h-3.5 text-amber-600" />
                           </Link>
+
+                          {/* Clone Quotation */}
+                          <button
+                            type="button"
+                            onClick={() => handleClone(q.id)}
+                            title="Clone quotation"
+                            className="p-1 rounded-md text-slate-600 hover:text-indigo-700 hover:bg-indigo-50 border border-slate-200 transition text-[11px] font-semibold cursor-pointer"
+                          >
+                            <Copy className="w-3.5 h-3.5 text-indigo-600" />
+                          </button>
 
                           {/* Convert to Order */}
                           {q.status !== 'Accepted' && (
@@ -611,5 +668,13 @@ export default function QuotationsRegisterPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function QuotationsRegisterPage() {
+  return (
+    <Suspense fallback={<div className="p-12 text-center text-xs text-slate-500 font-medium">Loading quotations register...</div>}>
+      <QuotationsRegisterContent />
+    </Suspense>
   );
 }

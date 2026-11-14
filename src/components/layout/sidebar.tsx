@@ -22,15 +22,22 @@ import {
   Clock,
   Briefcase,
   ShieldCheck,
-  Building2,
   FolderOpen,
   X,
+  LogOut,
+  Target,
+  Layers,
+  Landmark,
+  CheckSquare,
+  Warehouse,
 } from 'lucide-react';
+import { logout } from '@/app/(auth)/login/actions';
 import type { UserRoleName } from '@/types/database';
 import type { ERPModule } from '@/types/rbac';
 
 interface SidebarProps {
   userRole?: UserRoleName;
+  userEmail?: string;
   activeEntity: string;
   allowedModules?: string[];
 }
@@ -57,43 +64,43 @@ const NAV_SECTIONS: NavSection[] = [
         name: 'Dashboard',
         href: '/dashboard',
         icon: LayoutDashboard,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
         module: 'Dashboard',
       },
       {
         name: 'Customers',
         href: '/dashboard/customers',
         icon: Users,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
         module: 'Customers',
       },
       {
         name: 'Enquiries',
         href: '/dashboard/enquiries',
         icon: FileText,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Office Assistant'],
         module: 'Enquiries / Leads',
       },
       {
-        name: 'Follow-ups',
+        name: 'Follow-ups & Tasks',
         href: '/dashboard/follow-ups',
         icon: PhoneCall,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Office Assistant'],
         module: 'Follow-ups',
       },
       {
         name: 'Site Visits',
         href: '/dashboard/site-visits',
         icon: Calendar,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Office Assistant'],
         module: 'Site Visits',
       },
       {
-        name: 'Tasks',
-        href: '/dashboard/follow-ups',
-        icon: Briefcase,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
-        module: 'Dashboard',
+        name: 'Approvals',
+        href: '/dashboard/approvals',
+        icon: CheckSquare,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Accounts'],
+        module: 'Quotations',
       },
     ],
   },
@@ -104,93 +111,125 @@ const NAV_SECTIONS: NavSection[] = [
         name: 'Quotations',
         href: '/dashboard/quotations',
         icon: FileSpreadsheet,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
         module: 'Quotations',
       },
       {
-        name: 'Orders',
+        name: 'Proforma Invoices',
+        href: '/dashboard/proforma-invoices',
+        icon: FileSpreadsheet,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts'],
+        module: 'Quotations',
+        tag: 'PI',
+      },
+      {
+        name: 'Sales Orders',
         href: '/dashboard/sales-orders',
         icon: ShoppingBag,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts'],
         module: 'Sales Orders',
       },
       {
-        name: 'Invoices',
-        href: '/dashboard/invoices',
-        icon: CreditCard,
-        roles: ['Managing Director', 'Admin / BDM', 'Accounts', 'BDM', 'Sales Executive'],
-        module: 'Invoices & Billing',
+        name: 'Prospect Intelligence',
+        href: '/dashboard/ai/prospect-intelligence',
+        icon: Target,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive'],
+        module: 'Enquiries / Leads',
+        tag: 'AI',
       },
     ],
   },
   {
-    title: 'PROJECTS',
+    title: 'PURCHASE & FULFILMENT',
+    items: [
+      {
+        name: 'Products & Catalog',
+        href: '/dashboard/products',
+        icon: Package,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        module: 'Product Catalog',
+      },
+      {
+        name: 'Purchase Orders',
+        href: '/dashboard/purchases',
+        icon: Truck,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'Accounts', 'BDM'],
+        module: 'Purchases',
+      },
+      {
+        name: 'Inventory & Serials',
+        href: '/dashboard/inventory',
+        icon: Warehouse,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Accounts', 'Office Assistant'],
+        module: 'Purchases',
+      },
+      {
+        name: 'Delivery Challans',
+        href: '/dashboard/delivery-challans',
+        icon: Truck,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        module: 'Purchases',
+        tag: 'Rule 55',
+      },
+      {
+        name: 'Dispatch & Shipping',
+        href: '/dashboard/dispatch',
+        icon: Truck,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Office Assistant'],
+        module: 'Sales Orders',
+      },
+    ],
+  },
+  {
+    title: 'ACCOUNTS',
+    items: [
+      {
+        name: 'Invoices & Billing',
+        href: '/dashboard/invoices',
+        icon: CreditCard,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'Accounts', 'BDM', 'Sales Executive'],
+        module: 'Invoices & Billing',
+      },
+      {
+        name: 'Tally Accounting',
+        href: '/dashboard/tally',
+        icon: Landmark,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'Accounts'],
+        module: 'Invoices & Billing',
+        tag: 'Tally 7.2',
+      },
+    ],
+  },
+  {
+    title: 'PROJECTS & SERVICE',
     items: [
       {
         name: 'Projects',
         href: '/dashboard/projects',
         icon: Briefcase,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
         module: 'Projects',
       },
       {
-        name: 'Project Documents',
-        href: '/dashboard/documents',
-        icon: FolderOpen,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
-        module: 'Dashboard',
-      },
-    ],
-  },
-  {
-    title: 'PURCHASE',
-    items: [
-      {
-        name: 'Suppliers & Catalog',
-        href: '/dashboard/products',
-        icon: Package,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
-        module: 'Product Catalog',
-      },
-      {
-        name: 'Purchase / Sourcing',
-        href: '/dashboard/purchases',
-        icon: Truck,
-        roles: ['Managing Director', 'Admin / BDM', 'Accounts', 'BDM'],
-        module: 'Purchases',
-      },
-    ],
-  },
-  {
-    title: 'SERVICE',
-    items: [
-      {
-        name: 'Service',
-        href: '/dashboard/service',
+        name: 'Installations',
+        href: '/dashboard/installations',
         icon: Wrench,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
-        module: 'Service & AMC',
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Office Assistant'],
+        module: 'Projects',
       },
       {
-        name: 'AMC',
+        name: 'Service & AMC',
         href: '/dashboard/service',
         icon: ShieldCheck,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
         module: 'Service & AMC',
-        tag: 'Radar',
       },
-    ],
-  },
-  {
-    title: 'DOCUMENTS',
-    items: [
       {
-        name: 'Documents',
+        name: 'Documents Vault',
         href: '/dashboard/documents',
-        icon: FileText,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        icon: FolderOpen,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
         module: 'Dashboard',
-        tag: 'Vault',
       },
     ],
   },
@@ -201,21 +240,21 @@ const NAV_SECTIONS: NavSection[] = [
         name: 'Employees',
         href: '/dashboard/employees',
         icon: Users,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
         module: 'HR & Employees',
       },
       {
         name: 'Attendance',
         href: '/dashboard/employees/attendance',
         icon: Clock,
-        roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts', 'Office Assistant'],
         module: 'Attendance & Time',
       },
       {
         name: 'Salary & Payroll',
         href: '/dashboard/employees/payroll',
         icon: CreditCard,
-        roles: ['Managing Director', 'Admin / BDM', 'Accounts'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'Accounts'],
         module: 'Payroll & Compensation',
         tag: 'Confidential',
       },
@@ -228,7 +267,14 @@ const NAV_SECTIONS: NavSection[] = [
         name: 'Reports',
         href: '/dashboard/reports',
         icon: BarChart3,
-        roles: ['Managing Director', 'Admin / BDM', 'Accounts', 'BDM'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'Accounts', 'BDM'],
+        module: 'Reports',
+      },
+      {
+        name: 'Report Builder',
+        href: '/dashboard/reports/builder',
+        icon: FileSpreadsheet,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM', 'Accounts', 'BDM'],
         module: 'Reports',
       },
     ],
@@ -240,29 +286,29 @@ const NAV_SECTIONS: NavSection[] = [
         name: 'Settings',
         href: '/dashboard/settings',
         icon: Settings,
-        roles: ['Managing Director', 'Admin / BDM'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM'],
         module: 'System Settings',
       },
       {
         name: 'Users & Permissions',
         href: '/dashboard/settings/users',
         icon: Users,
-        roles: ['Managing Director', 'Admin / BDM'],
+        roles: ['Managing Director', 'Admin', 'Admin / BDM'],
         module: 'User Management',
       },
       {
-        name: 'Training & Demo',
-        href: '/dashboard/settings/demo',
-        icon: Wrench,
-        roles: ['Managing Director', 'Admin / BDM'],
+        name: 'Email Auth (Zoho & Gmail)',
+        href: '/dashboard/settings/integrations',
+        icon: Layers,
+        roles: ['Managing Director', 'Admin', 'Admin / BDM'],
         module: 'System Settings',
-        tag: 'Admin',
+        tag: 'Auth/Reset',
       },
     ],
   },
 ];
 
-export function Sidebar({ userRole = 'Managing Director', activeEntity, allowedModules }: SidebarProps) {
+export function Sidebar({ userRole = 'Managing Director', userEmail, activeEntity, allowedModules }: SidebarProps) {
   const pathname = usePathname();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
@@ -359,9 +405,21 @@ export function Sidebar({ userRole = 'Managing Director', activeEntity, allowedM
         </div>
 
         {/* Navigation Sections */}
-        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-4 scrollbar-thin scrollbar-thumb-slate-800">
+        <div className="flex-1 overflow-y-auto px-3 py-2 pb-8 space-y-4 scrollbar-thin scrollbar-thumb-slate-800">
           {NAV_SECTIONS.map((section) => {
             const visibleItems = section.items.filter((item) => {
+              // Privacy & Security Gate: Reshma and Hemalath must never see the corporate shared Gmail link
+              if (item.href === '/dashboard/communication/gmail' && userEmail) {
+                const normEmail = userEmail.toLowerCase().trim();
+                if (
+                  normEmail === 'sales@icontechpro.in' ||
+                  normEmail === 'reshma@icontechpro.in' ||
+                  normEmail === 'accounts@icontechpro.in'
+                ) {
+                  return false;
+                }
+              }
+
               if (allowedModules && allowedModules.length > 0 && item.module) {
                 return allowedModules.includes(item.module);
               }
@@ -379,8 +437,12 @@ export function Sidebar({ userRole = 'Managing Director', activeEntity, allowedM
                   const Icon = item.icon;
                   const isActive =
                     pathname === item.href ||
-                    (item.href === '/dashboard/customers' && (pathname === '/customers' || pathname.startsWith('/dashboard/customers'))) ||
-                    (item.href !== '/dashboard' && pathname.startsWith(item.href));
+                    (item.href === '/dashboard/customers' && (pathname === '/customers' || pathname.startsWith('/dashboard/customers/'))) ||
+                    (item.href !== '/dashboard' &&
+                      item.href !== '/dashboard/settings' &&
+                      item.href !== '/dashboard/employees' &&
+                      item.href !== '/dashboard/reports' &&
+                      pathname.startsWith(`${item.href}/`));
 
                   return (
                     <Link
@@ -417,10 +479,10 @@ export function Sidebar({ userRole = 'Managing Director', activeEntity, allowedM
           })}
         </div>
 
-        {/* User Role Badge Footer */}
-        <div className="p-3 border-t border-slate-800 bg-slate-950/60">
-          <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700/50">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        {/* User Role Badge & Prominent Logout Footer */}
+        <div className="p-3 border-t border-slate-800 bg-slate-950/80 space-y-2 shrink-0">
+          <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700/50">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             <div className="leading-tight overflow-hidden">
               <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider block">
                 Active Role
@@ -430,6 +492,24 @@ export function Sidebar({ userRole = 'Managing Director', activeEntity, allowedM
               </span>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await logout();
+              } catch (e: any) {
+                if (e?.message?.includes('NEXT_REDIRECT') || e?.digest?.includes('NEXT_REDIRECT')) {
+                  window.location.href = '/login';
+                }
+              }
+            }}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 hover:border-rose-700 transition cursor-pointer group shadow-xs"
+            title="Terminate session and sign out securely"
+          >
+            <LogOut className="w-3.5 h-3.5 text-rose-400 group-hover:translate-x-0.5 transition" />
+            <span>Sign Out / Invalidate Session</span>
+          </button>
         </div>
       </aside>
     </>

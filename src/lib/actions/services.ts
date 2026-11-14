@@ -1,8 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { findByIdOrCode, isUuid, sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { INITIAL_SERVICE_TICKETS, INITIAL_RENTALS } from '@/lib/constants/erp-data';
 import { requireRole } from '@/lib/auth/session';
@@ -121,9 +121,9 @@ export async function getServiceTickets(): Promise<ServiceTicket[]> {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      const { data, error } = await supabase.from('service_tickets').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
+      const admin = createAdminClient();
+      const { data, error } = await admin.from('service_tickets').select('*').order('created_at', { ascending: false });
+      if (!error && data) {
         return data as ServiceTicket[];
       }
     } catch (err) {
@@ -135,6 +135,7 @@ export async function getServiceTickets(): Promise<ServiceTicket[]> {
 }
 
 export async function createServiceTicket(payload: {
+  customer_id?: string;
   customer_name: string;
   product_name?: string;
   serial_number?: string;
@@ -148,14 +149,13 @@ export async function createServiceTicket(payload: {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive']);
 
     const store = getServiceTicketsStore();
-    const entity: OrganizationEntity = 'ICON_TECH_PRO';
     const ticketNumber = await getNextServiceTicketNumber();
 
     const ticket: ServiceTicket = {
       id: `SRV-${Date.now()}`,
       ticket_number: ticketNumber,
       entity_code: 'ICON_TECH_PRO',
-      customer_id: 'CUST-GENERIC',
+      customer_id: payload.customer_id || 'CUST-GENERIC',
       customer_name: payload.customer_name,
       product_name: payload.product_name,
       serial_number: payload.serial_number,
@@ -166,6 +166,45 @@ export async function createServiceTicket(payload: {
       service_charge: 0,
       created_at: new Date().toISOString(),
     };
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        let resolvedCustomerId = sanitizeUuid(payload.customer_id);
+        if (!resolvedCustomerId && payload.customer_name) {
+          const { data: cust } = await admin
+            .from('customers')
+            .select('id')
+            .ilike('customer_name', payload.customer_name)
+            .limit(1)
+            .maybeSingle();
+          resolvedCustomerId = cust?.id || null;
+        }
+        if (resolvedCustomerId) {
+          ticket.customer_id = resolvedCustomerId;
+          const { data: dbTicket } = await admin
+            .from('service_tickets')
+            .insert({
+              ticket_number: ticket.ticket_number,
+              entity_code: ticket.entity_code,
+              customer_id: resolvedCustomerId,
+              customer_name: ticket.customer_name,
+              product_name: ticket.product_name || null,
+              serial_number: ticket.serial_number || null,
+              complaint_description: ticket.complaint_description,
+              priority: ticket.priority,
+              assigned_technician_name: ticket.assigned_technician_name,
+              status: ticket.status,
+              service_charge: 0,
+            })
+            .select('id')
+            .single();
+          if (dbTicket?.id) ticket.id = dbTicket.id;
+        }
+      } catch (dbErr) {
+        console.warn('Supabase createServiceTicket fallback:', dbErr);
+      }
+    }
 
     store.unshift(ticket);
 
@@ -189,9 +228,9 @@ export async function getAMCContracts(): Promise<AMCContract[]> {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      const { data, error } = await supabase.from('amc_contracts').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
+      const admin = createAdminClient();
+      const { data, error } = await admin.from('amc_contracts').select('*').order('created_at', { ascending: false });
+      if (!error && data) {
         return data as AMCContract[];
       }
     } catch (err) {
@@ -226,8 +265,10 @@ export async function renewAMCContract(
 ): Promise<{ success: boolean; data?: AMCContract; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Sales Executive']);
-    const store = getAMCContractsStore();
-    const existing = store.find((c) => c.id === contractId || c.contract_number === contractId);
+    const isOnline = await isSupabaseAvailable();
+    const admin = isOnline ? createAdminClient() : null;
+    const contracts = await getAMCContracts();
+    const existing = contracts.find((c) => c.id === contractId || c.contract_number === contractId);
     if (!existing) {
       return { success: false, error: 'AMC Contract not found' };
     }
@@ -243,7 +284,7 @@ export async function renewAMCContract(
     newEnd.setDate(newEnd.getDate() - 1);
 
     const fy = getIndianFinancialYear();
-    const seq = (store.length + 1).toString().padStart(4, '0');
+    const seq = (contracts.length + 1).toString().padStart(4, '0');
     const newContractNumber = `ICON/${fy}/AMC-${seq}`;
 
     const newContract: AMCContract = {
@@ -265,33 +306,38 @@ export async function renewAMCContract(
       created_at: new Date().toISOString(),
     };
 
-    store.unshift(newContract);
+    getAMCContractsStore().unshift(newContract);
 
-    if (await isSupabaseAvailable()) {
+    if (admin) {
       try {
-        const admin = createAdminClient();
-        await admin
-          .from('amc_contracts')
-          .update({ renewal_status: 'RENEWED' })
-          .or(`id.eq.${existing.id},contract_number.eq.${existing.contract_number}`);
+        const upQ = admin.from('amc_contracts').update({ renewal_status: 'RENEWED' });
+        await (isUuid(existing.id) ? upQ.eq('id', existing.id) : upQ.eq('contract_number', existing.contract_number));
 
-        await admin.from('amc_contracts').insert([
-          {
-            contract_number: newContractNumber,
-            entity_code: newContract.entity_code,
-            customer_name: newContract.customer_name,
-            start_date: newContract.start_date,
-            end_date: newContract.end_date,
-            annual_visits_count: newContract.annual_visits_count,
-            contract_value: newContract.contract_value,
-            is_active: true,
-            amc_type: newContract.amc_type,
-            sla_hours: newContract.sla_hours,
-            scheduled_visits_count: newContract.scheduled_visits_count,
-            completed_visits_count: 0,
-            renewal_status: 'ACTIVE',
-          },
-        ]);
+        if (isUuid(newContract.customer_id)) {
+          const { data: insertedAmc } = await admin
+            .from('amc_contracts')
+            .insert([
+              {
+                contract_number: newContractNumber,
+                entity_code: newContract.entity_code,
+                customer_id: newContract.customer_id,
+                customer_name: newContract.customer_name,
+                start_date: newContract.start_date,
+                end_date: newContract.end_date,
+                annual_visits_count: newContract.annual_visits_count,
+                contract_value: newContract.contract_value,
+                is_active: true,
+                amc_type: newContract.amc_type,
+                sla_hours: newContract.sla_hours,
+                scheduled_visits_count: newContract.scheduled_visits_count,
+                completed_visits_count: 0,
+                renewal_status: 'ACTIVE',
+              },
+            ])
+            .select('id')
+            .single();
+          if (insertedAmc?.id) newContract.id = insertedAmc.id;
+        }
       } catch (err) {
         console.warn('Supabase renewAMCContract fallback:', err);
       }
@@ -321,8 +367,8 @@ export async function scheduleMaintenanceVisit(
 ): Promise<{ success: boolean; data?: AMCContract; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Sales Executive', 'Office Assistant']);
-    const store = getAMCContractsStore();
-    const contract = store.find((c) => c.id === contractId || c.contract_number === contractId);
+    const contracts = await getAMCContracts();
+    const contract = contracts.find((c) => c.id === contractId || c.contract_number === contractId);
     if (!contract) {
       return { success: false, error: 'AMC Contract not found' };
     }
@@ -336,13 +382,11 @@ export async function scheduleMaintenanceVisit(
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin
-          .from('amc_contracts')
-          .update({
-            scheduled_visits_count: contract.scheduled_visits_count,
-            completed_visits_count: contract.completed_visits_count,
-          })
-          .or(`id.eq.${contract.id},contract_number.eq.${contract.contract_number}`);
+        const upQ = admin.from('amc_contracts').update({
+          scheduled_visits_count: contract.scheduled_visits_count,
+          completed_visits_count: contract.completed_visits_count,
+        });
+        await (isUuid(contract.id) ? upQ.eq('id', contract.id) : upQ.eq('contract_number', contract.contract_number));
       } catch (err) {
         console.warn('Supabase scheduleMaintenanceVisit fallback:', err);
       }
@@ -372,8 +416,8 @@ export async function updateServiceTicketStatus(
 ): Promise<{ success: boolean; data?: ServiceTicket; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Sales Executive', 'Office Assistant']);
-    const store = getServiceTicketsStore();
-    const ticket = store.find((t) => t.id === ticketId || t.ticket_number === ticketId);
+    const tickets = await getServiceTickets();
+    const ticket = tickets.find((t) => t.id === ticketId || t.ticket_number === ticketId);
     if (!ticket) {
       return { success: false, error: 'Service ticket not found' };
     }
@@ -386,13 +430,13 @@ export async function updateServiceTicketStatus(
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin
+        const upQ = admin
           .from('service_tickets')
           .update({
             status,
             resolution_details: ticket.resolution_details,
-          })
-          .or(`id.eq.${ticket.id},ticket_number.eq.${ticket.ticket_number}`);
+          });
+        await (isUuid(ticket.id) ? upQ.eq('id', ticket.id) : upQ.eq('ticket_number', ticket.ticket_number));
       } catch (err) {
         console.warn('Supabase updateServiceTicketStatus fallback:', err);
       }
@@ -421,9 +465,9 @@ export async function getWarrantyClaims(): Promise<WarrantyClaim[]> {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      const { data, error } = await supabase.from('warranty_claims').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
+      const admin = createAdminClient();
+      const { data, error } = await admin.from('warranty_claims').select('*').order('created_at', { ascending: false });
+      if (!error && data) {
         return data as WarrantyClaim[];
       }
     } catch (err) {
@@ -514,8 +558,8 @@ export async function updateWarrantyClaimStatus(
 ): Promise<{ success: boolean; data?: WarrantyClaim; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Sales Executive']);
-    const store = getWarrantyClaimsStore();
-    const claim = store.find((c) => c.id === claimId || c.claim_number === claimId);
+    const claims = await getWarrantyClaims();
+    const claim = claims.find((c) => c.id === claimId || c.claim_number === claimId);
     if (!claim) {
       return { success: false, error: 'Warranty claim not found' };
     }
@@ -531,14 +575,14 @@ export async function updateWarrantyClaimStatus(
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin
+        const upQ = admin
           .from('warranty_claims')
           .update({
             status,
             resolution_notes: claim.resolution_notes || null,
             resolved_at: claim.resolved_at || null,
-          })
-          .or(`id.eq.${claim.id},claim_number.eq.${claim.claim_number}`);
+          });
+        await (isUuid(claim.id) ? upQ.eq('id', claim.id) : upQ.eq('claim_number', claim.claim_number));
       } catch (err) {
         console.warn('Supabase updateWarrantyClaimStatus fallback:', err);
       }
@@ -575,24 +619,28 @@ export async function checkWarrantyStatus(serialNumber: string): Promise<{
     const isOnline = await isSupabaseAvailable();
     if (isOnline) {
       try {
-        const supabase = await createClient();
-        const { data } = await supabase
-          .from('serial_records')
-          .select('*')
+        const admin = createAdminClient();
+        const { data } = await admin
+          .from('inventory_serials')
+          .select('*, products(name, warranty_months)')
           .eq('serial_number', serialNumber)
           .maybeSingle();
 
         if (data) {
+          const warrantyMonths = Number(data.products?.warranty_months) || 12;
+          const startDate = data.created_at ? new Date(data.created_at) : new Date();
+          startDate.setMonth(startDate.getMonth() + warrantyMonths);
+          const computedEnd = startDate.toISOString().split('T')[0];
           const todayStr = new Date().toISOString().split('T')[0];
-          const isActive = Boolean(data.warranty_end_date && data.warranty_end_date >= todayStr);
+          const isActive = computedEnd >= todayStr;
           return {
             success: true,
             serialNumber,
             isWarrantyActive: isActive,
             status: isActive ? 'ACTIVE' : 'EXPIRED',
-            warrantyEndDate: data.warranty_end_date,
-            provider: data.warranty_provider,
-            customerName: data.customer_name,
+            warrantyEndDate: computedEnd,
+            provider: 'ICON TECH PRO / OEM',
+            customerName: undefined,
           };
         }
       } catch (err) {
@@ -637,10 +685,25 @@ export async function checkWarrantyStatus(serialNumber: string): Promise<{
 }
 
 export async function getRentals(): Promise<EquipmentRental[]> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const { data, error } = await admin
+        .from('equipment_rentals')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        return data as EquipmentRental[];
+      }
+    } catch (err) {
+      console.warn('Supabase equipment_rentals query failed:', err);
+    }
+  }
   return getRentalsStore();
 }
 
 export async function createRentalAgreement(payload: {
+  customer_id?: string;
   customer_name: string;
   product_name: string;
   serial_number?: string;
@@ -653,15 +716,13 @@ export async function createRentalAgreement(payload: {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM']);
 
     const store = getRentalsStore();
-    const fy = getIndianFinancialYear();
-    const seq = (store.length + 1).toString().padStart(4, '0');
-    const rentalNumber = `ICON/${fy}/RNT-${seq}`;
+    const rentalNumber = await getNextRentalAgreementNumber();
 
     const rental: EquipmentRental = {
       id: `RNT-${Date.now()}`,
       rental_number: rentalNumber,
       entity_code: 'ICON_TECH_PRO',
-      customer_id: 'CUST-GENERIC',
+      customer_id: payload.customer_id || 'CUST-GENERIC',
       customer_name: payload.customer_name,
       product_name: payload.product_name,
       serial_number: payload.serial_number,
@@ -672,6 +733,45 @@ export async function createRentalAgreement(payload: {
       status: 'Active',
       created_at: new Date().toISOString(),
     };
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        let resolvedCustomerId = sanitizeUuid(payload.customer_id);
+        if (!resolvedCustomerId && payload.customer_name) {
+          const { data: cust } = await admin
+            .from('customers')
+            .select('id')
+            .ilike('customer_name', payload.customer_name)
+            .limit(1)
+            .maybeSingle();
+          resolvedCustomerId = cust?.id || null;
+        }
+        if (resolvedCustomerId) {
+          rental.customer_id = resolvedCustomerId;
+          const { data: dbRental } = await admin
+            .from('equipment_rentals')
+            .insert({
+              rental_number: rental.rental_number,
+              entity_code: rental.entity_code,
+              customer_id: resolvedCustomerId,
+              customer_name: rental.customer_name,
+              product_name: rental.product_name,
+              serial_number: rental.serial_number || null,
+              start_date: rental.start_date,
+              end_date: rental.end_date,
+              security_deposit: rental.security_deposit,
+              rental_fee: rental.rental_fee,
+              status: rental.status,
+            })
+            .select('id')
+            .single();
+          if (dbRental?.id) rental.id = dbRental.id;
+        }
+      } catch (dbErr) {
+        console.warn('Supabase createRentalAgreement fallback:', dbErr);
+      }
+    }
 
     store.unshift(rental);
 

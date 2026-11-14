@@ -81,8 +81,8 @@ export async function getSerialRecords(filters?: {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('serial_records').select('*', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('serial_records').select('*', { count: 'exact' });
 
       if (filters?.status) {
         query = query.eq('status', filters.status);
@@ -97,7 +97,7 @@ export async function getSerialRecords(filters?: {
 
       query = query.order('created_at', { ascending: false });
       const { data, error, count } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return { records: data as SerialRecord[], total: count ?? data.length };
       }
     } catch (err) {
@@ -255,8 +255,23 @@ export async function getWarrantyInfo(serialNumber: string): Promise<{
   warrantyStatus: 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED' | 'UNREGISTERED';
   daysRemaining: number;
 }> {
-  const store = getInternalSerialsStore();
-  const serial = store.find((r) => r.serial_number.toLowerCase() === serialNumber.trim().toLowerCase());
+  const cleanSerial = serialNumber.trim();
+  let serial: SerialRecord | undefined;
+
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const { data } = await admin
+        .from('serial_records')
+        .select('*')
+        .ilike('serial_number', cleanSerial)
+        .maybeSingle();
+      if (data) serial = data as SerialRecord;
+    } catch {}
+  } else {
+    const store = getInternalSerialsStore();
+    serial = store.find((r) => r.serial_number.toLowerCase() === cleanSerial.toLowerCase());
+  }
 
   if (!serial || !serial.warranty_end_date) {
     return {
@@ -291,12 +306,12 @@ export async function getWarrantyInfo(serialNumber: string): Promise<{
  * Retrieve installed serials whose warranty is expiring within specified days (default 30/60).
  */
 export async function getExpiringWarranties(withinDays: number = 30): Promise<SerialRecord[]> {
-  const store = getInternalSerialsStore();
+  const { records } = await getSerialRecords({ status: 'INSTALLED' });
   const now = new Date();
   const futureLimit = new Date();
   futureLimit.setDate(now.getDate() + withinDays);
 
-  return store.filter((s) => {
+  return records.filter((s) => {
     if (!s.warranty_end_date || s.status !== 'INSTALLED') return false;
     const end = new Date(s.warranty_end_date);
     return end >= now && end <= futureLimit;

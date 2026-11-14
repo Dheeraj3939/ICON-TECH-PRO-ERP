@@ -1,18 +1,17 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { getAuthenticatedUser } from '@/lib/auth/session';
+import { isUserAuthorizedForGmailMailbox } from '@/lib/actions/gmail';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+export default async function CommunicationsGmailRedirect() {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    redirect('/login');
+  }
 
-export default function CommunicationsGmailRedirect() {
-  const router = useRouter();
+  const isAuthorized = await isUserAuthorizedForGmailMailbox(user);
+  if (!isAuthorized) {
+    redirect('/dashboard?error=gmail_unauthorized');
+  }
 
-  useEffect(() => {
-    router.replace('/dashboard/communication/gmail');
-  }, [router]);
-
-  return (
-    <div className="p-8 text-center text-xs text-slate-500">
-      Redirecting to Gmail Mailbox...
-    </div>
-  );
+  redirect('/dashboard/communication/gmail');
 }

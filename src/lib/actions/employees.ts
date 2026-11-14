@@ -5,6 +5,7 @@ import { getAuthenticatedUser, requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { findByIdOrCode, isUuid } from '@/lib/supabase/db-helpers';
 import { INITIAL_EMPLOYEES, INITIAL_HR_AUDIT_EVENTS } from '@/lib/constants/hr-data';
 import type { Employee, HRAuditEvent } from '@/types/hr';
 
@@ -100,7 +101,7 @@ export async function getEmployees(filters?: {
         .select('*')
         .order('employee_id', { ascending: true });
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         list = data.map((d: any) => ({
           id: d.id,
           employee_id: d.employee_id,
@@ -171,6 +172,17 @@ export async function getEmployeeById(id: string): Promise<Employee | null> {
     'Office Assistant',
   ]);
 
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const row = await findByIdOrCode<Employee>(admin, 'employees', id, 'employee_id');
+      if (row) return row;
+      return null;
+    } catch {
+      // Fallback
+    }
+  }
+
   const store = getEmployeesStore();
   const emp = store.find((e) => e.id === id || e.employee_id === id);
   return emp || null;
@@ -200,14 +212,41 @@ export async function createEmployee(data: {
   const authUser = await requireRole(['Managing Director', 'Admin / BDM']);
 
   const store = getEmployeesStore();
-  const existing = store.find(
-    (e) => e.corporate_email.toLowerCase() === data.corporate_email.toLowerCase()
-  );
-  if (existing) {
-    return { success: false, error: 'An employee with this corporate email already exists.' };
+  const isOnline = await isSupabaseAvailable();
+
+  let newEmpId = getNextEmployeeId();
+  if (isOnline) {
+    try {
+      const admin = createAdminClient();
+      const { data: existingDb } = await admin
+        .from('employees')
+        .select('id')
+        .ilike('corporate_email', data.corporate_email.trim())
+        .maybeSingle();
+      if (existingDb) {
+        return { success: false, error: 'An employee with this corporate email already exists.' };
+      }
+      const { data: allIds } = await admin.from('employees').select('employee_id');
+      if (allIds && allIds.length > 0) {
+        let maxNum = 0;
+        for (const r of allIds) {
+          const m = String(r.employee_id || '').match(/(\d+)$/);
+          if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+        }
+        newEmpId = `EMP-${String(maxNum + 1).padStart(4, '0')}`;
+      } else {
+        newEmpId = 'EMP-0001';
+      }
+    } catch {}
+  } else {
+    const existing = store.find(
+      (e) => e.corporate_email.toLowerCase() === data.corporate_email.toLowerCase()
+    );
+    if (existing) {
+      return { success: false, error: 'An employee with this corporate email already exists.' };
+    }
   }
 
-  const newEmpId = getNextEmployeeId();
   const newId = `EMP-UUID-${newEmpId.replace('EMP-', '')}`;
 
   const newEmployee: Employee = {
@@ -236,7 +275,6 @@ export async function createEmployee(data: {
 
   store.push(newEmployee);
 
-  const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
       const admin = createAdminClient();
@@ -290,24 +328,36 @@ export async function updateEmployee(
 ): Promise<{ success: boolean; error?: string }> {
   const authUser = await requireRole(['Managing Director', 'Admin / BDM']);
 
+  const isOnline = await isSupabaseAvailable();
+  const admin = isOnline ? createAdminClient() : null;
   const store = getEmployeesStore();
   const idx = store.findIndex((e) => e.id === id || e.employee_id === id);
-  if (idx === -1) {
+
+  let target: Employee | null = idx >= 0 ? store[idx] : null;
+  if (admin) {
+    const dbEmp = await findByIdOrCode<Employee>(admin, 'employees', id, 'employee_id');
+    if (dbEmp) target = dbEmp;
+  }
+
+  if (!target) {
     return { success: false, error: 'Employee record not found.' };
   }
 
-  const prev = { ...store[idx] };
-  store[idx] = {
-    ...store[idx],
+  const prev = { ...target };
+  const updatedRecord: Employee = {
+    ...target,
     ...updates,
     updated_at: new Date().toISOString(),
   };
 
-  const isOnline = await isSupabaseAvailable();
-  if (isOnline) {
+  if (idx >= 0) {
+    store[idx] = updatedRecord;
+  }
+
+  if (admin) {
     try {
-      const admin = createAdminClient();
-      await admin.from('employees').update(updates).eq('id', id);
+      const query = admin.from('employees').update({ ...updates, updated_at: updatedRecord.updated_at });
+      await (isUuid(target.id) ? query.eq('id', target.id) : query.eq('employee_id', target.employee_id));
     } catch {
       // Non-fatal
     }
@@ -319,9 +369,9 @@ export async function updateEmployee(
     action: 'UPDATE_EMPLOYEE',
     module: 'HR',
     entity: 'employees',
-    record_id: store[idx].employee_id,
+    record_id: updatedRecord.employee_id,
     previous_value: prev as any,
-    new_value: store[idx] as any,
+    new_value: updatedRecord as any,
   });
 
   revalidatePath('/dashboard/employees');
@@ -334,5 +384,20 @@ export async function updateEmployee(
  */
 export async function getHRAuditEvents(): Promise<HRAuditEvent[]> {
   await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const { data, error } = await admin
+        .from('hr_audit_events')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(100);
+      if (!error && data) {
+        return data as HRAuditEvent[];
+      }
+    } catch {
+      // Fallback
+    }
+  }
   return getHRAuditStore();
 }

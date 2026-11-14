@@ -6,10 +6,14 @@ import { Package, Plus, Search, Filter, AlertTriangle, CheckCircle2, Tag, Downlo
 import { getProducts, getProductCategories, createProduct, canViewProductCosts } from '@/lib/actions/products';
 import { fetchProductSpecs, approveProductSpecs } from '@/lib/actions/spec-intelligence';
 import { exportToCSV } from '@/lib/utils/export';
+import { getCurrentSessionUser } from '@/lib/actions/users';
+import { canExportCSV, canImportCSV } from '@/lib/permissions/registry';
+import type { AuthenticatedUser } from '@/lib/auth/session';
 import type { Product } from '@/types/erp';
 import EditProductModal from '@/components/modals/EditProductModal';
 
 export default function ProductsPage() {
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('ALL');
@@ -47,16 +51,20 @@ export default function ProductsPage() {
   });
 
   const loadData = async () => {
-    const res = await getProducts({
-      category: selectedCategory,
-      search,
-      lowStockOnly,
-    });
+    const [res, cats, allowCost, user] = await Promise.all([
+      getProducts({
+        category: selectedCategory,
+        search,
+        lowStockOnly,
+      }),
+      getProductCategories(),
+      canViewProductCosts(),
+      getCurrentSessionUser(),
+    ]);
     setProducts(res.products);
-    const cats = await getProductCategories();
     setCategories(cats);
-    const allowCost = await canViewProductCosts();
     setCanViewCost(allowCost);
+    setCurrentUser(user);
   };
 
   useEffect(() => {
@@ -91,7 +99,7 @@ export default function ProductsPage() {
       { key: 'unit', label: 'Unit' },
       { key: 'reorder_level', label: 'Reorder Level' },
     ];
-    exportToCSV('ICON_Product_Catalog', products, exportColumns);
+    exportToCSV('ICON_Product_Catalog', products, exportColumns, currentUser?.role);
   };
 
   const handleOpenSpecModal = (prod: Product) => {
@@ -149,21 +157,25 @@ export default function ProductsPage() {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <Link
-            href="/dashboard/import"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
-          >
-            <UploadCloud className="w-4 h-4 text-brand-600" />
-            <span>Import CSV</span>
-          </Link>
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
-          >
-            <Download className="w-4 h-4 text-slate-500" />
-            <span>Export CSV</span>
-          </button>
+          {canImportCSV(currentUser?.role) && (
+            <Link
+              href="/dashboard/import"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
+            >
+              <UploadCloud className="w-4 h-4 text-brand-600" />
+              <span>Import CSV</span>
+            </Link>
+          )}
+          {canExportCSV(currentUser?.role) && (
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setIsAddModalOpen(true)}

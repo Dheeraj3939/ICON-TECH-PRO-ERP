@@ -1,8 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { sanitizeSearchTerm, sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole, getAuthenticatedUser } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
@@ -115,8 +115,8 @@ export async function getSupplierOffers(filters?: {
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('supplier_price_offers').select('*', { count: 'exact' });
+      const admin = createAdminClient();
+      let query = admin.from('supplier_price_offers').select('*', { count: 'exact' });
 
       if (filters?.enquiry_id) {
         query = query.eq('enquiry_id', filters.enquiry_id);
@@ -128,14 +128,16 @@ export async function getSupplierOffers(filters?: {
         query = query.eq('product_id', filters.product_id);
       }
       if (filters?.search) {
-        const s = filters.search.trim();
-        query = query.or(`supplier_name.ilike.%${s}%,product_name.ilike.%${s}%,offer_number.ilike.%${s}%`);
+        const s = sanitizeSearchTerm(filters.search);
+        if (s) {
+          query = query.or(`supplier_name.ilike.%${s}%,product_name.ilike.%${s}%,offer_number.ilike.%${s}%`);
+        }
       }
 
       query = query.order('created_at', { ascending: false });
       const { data, error, count } = await query;
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return {
           offers: (data as SupplierPriceOffer[]).map(sanitizeOffer),
           total: count ?? data.length,
@@ -231,30 +233,36 @@ export async function recordSupplierOffer(payload: {
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        await admin.from('supplier_price_offers').insert([
-          {
-            id: newOffer.id,
-            offer_number: newOffer.offer_number,
-            enquiry_id: newOffer.enquiry_id,
-            quotation_id: newOffer.quotation_id,
-            product_id: newOffer.product_id,
-            product_name: newOffer.product_name,
-            supplier_id: newOffer.supplier_id,
-            supplier_name: newOffer.supplier_name,
-            contact_person: newOffer.contact_person,
-            phone: newOffer.phone,
-            email: newOffer.email,
-            quoted_price: newOffer.quoted_price,
-            gst_rate: newOffer.gst_rate,
-            lead_time_days: newOffer.lead_time_days,
-            warranty_terms: newOffer.warranty_terms,
-            communication_method: newOffer.communication_method,
-            is_selected: newOffer.is_selected,
-            decision_notes: newOffer.decision_notes,
-            attachment_url: newOffer.attachment_url,
-            recorded_by: newOffer.recorded_by,
-          },
-        ]);
+        const { data: insertedOffer } = await admin
+          .from('supplier_price_offers')
+          .insert([
+            {
+              offer_number: newOffer.offer_number,
+              enquiry_id: sanitizeUuid(newOffer.enquiry_id),
+              quotation_id: sanitizeUuid(newOffer.quotation_id),
+              product_id: sanitizeUuid(newOffer.product_id),
+              product_name: newOffer.product_name,
+              supplier_id: sanitizeUuid(newOffer.supplier_id),
+              supplier_name: newOffer.supplier_name,
+              contact_person: newOffer.contact_person || null,
+              phone: newOffer.phone || null,
+              email: newOffer.email || null,
+              quoted_price: newOffer.quoted_price,
+              gst_rate: newOffer.gst_rate,
+              lead_time_days: newOffer.lead_time_days,
+              warranty_terms: newOffer.warranty_terms,
+              communication_method: newOffer.communication_method,
+              is_selected: newOffer.is_selected,
+              decision_notes: newOffer.decision_notes || null,
+              attachment_url: newOffer.attachment_url || null,
+              recorded_by: newOffer.recorded_by,
+            },
+          ])
+          .select('id')
+          .single();
+        if (insertedOffer?.id) {
+          newOffer.id = insertedOffer.id;
+        }
       } catch (err) {
         console.warn('Failed to insert supplier offer into Supabase:', err);
       }

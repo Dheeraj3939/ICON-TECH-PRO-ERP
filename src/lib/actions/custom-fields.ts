@@ -1,6 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import type { CustomFieldDefinition } from '@/types/rbac';
@@ -131,6 +133,21 @@ function getFieldsStore(): CustomFieldDefinition[] {
 }
 
 export async function getCustomFields(module?: CustomFieldDefinition['module']): Promise<CustomFieldDefinition[]> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin.from('custom_field_definitions').select('*').order('created_at', { ascending: true });
+      if (module) {
+        query = query.eq('module', module);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        return data as CustomFieldDefinition[];
+      }
+    } catch (err) {
+      console.warn('Supabase getCustomFields fallback:', err);
+    }
+  }
   const store = getFieldsStore();
   if (module) {
     return store.filter((f) => f.module === module);
@@ -139,8 +156,8 @@ export async function getCustomFields(module?: CustomFieldDefinition['module']):
 }
 
 export async function getActiveCustomFields(module: CustomFieldDefinition['module']): Promise<CustomFieldDefinition[]> {
-  const store = getFieldsStore();
-  return store.filter((f) => f.module === module && f.is_active);
+  const fields = await getCustomFields(module);
+  return fields.filter((f) => f.is_active);
 }
 
 export async function addCustomField(payload: {
@@ -196,6 +213,27 @@ export async function addCustomField(payload: {
 
     store.push(newField);
 
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        await admin.from('custom_field_definitions').insert({
+          id: newField.id,
+          module: newField.module,
+          field_key: newField.field_key,
+          field_label: newField.field_label,
+          field_type: newField.field_type,
+          options: newField.options || null,
+          is_required: newField.is_required,
+          is_searchable: newField.is_searchable ?? true,
+          is_filterable: newField.is_filterable ?? true,
+          is_reportable: newField.is_reportable ?? true,
+          is_active: true,
+        });
+      } catch (err) {
+        console.warn('Supabase addCustomField fallback:', err);
+      }
+    }
+
     await logAuditEvent({
       userName: actor.name,
       action: 'CUSTOM_FIELD_CREATED',
@@ -216,13 +254,27 @@ export async function toggleCustomFieldActive(
 ): Promise<{ success: boolean; data?: CustomFieldDefinition; error?: string }> {
   try {
     const actor = await requireRole(['Managing Director', 'Admin / BDM']);
-    const store = getFieldsStore();
-    const field = store.find((f) => f.id === fieldId);
+    const fields = await getCustomFields();
+    const field = fields.find((f) => f.id === fieldId);
     if (!field) {
       return { success: false, error: 'Custom field definition not found.' };
     }
 
     field.is_active = isActive;
+    const cached = getFieldsStore().find((f) => f.id === fieldId);
+    if (cached) cached.is_active = isActive;
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        await admin
+          .from('custom_field_definitions')
+          .update({ is_active: isActive, updated_at: new Date().toISOString() })
+          .eq('id', fieldId);
+      } catch (err) {
+        console.warn('Supabase toggleCustomFieldActive fallback:', err);
+      }
+    }
 
     await logAuditEvent({
       userName: actor.name,

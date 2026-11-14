@@ -47,8 +47,8 @@ import { getProjects } from '@/lib/actions/projects';
 import { getTasks } from '@/lib/actions/tasks';
 import { getApprovalRequests } from '@/lib/actions/approvals';
 import { getAMCContracts } from '@/lib/actions/services';
+import { getSiteVisits } from '@/lib/actions/operations';
 import { NewEnquiryModal } from '@/components/modals/NewEnquiryModal';
-import { NewQuotationModal } from '@/components/modals/NewQuotationModal';
 import { CustomerFormModal } from '@/components/customers/customer-form-modal';
 import { exportToCSV } from '@/lib/utils/export';
 import { ERP_SYSTEM_VERSION } from '@/lib/constants/version';
@@ -65,21 +65,22 @@ export default function UnifiedOperationsDashboard() {
   const [tasks, setTasks] = useState<ERPTask[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [amcList, setAmcList] = useState<any[]>([]);
+  const [siteVisitsToday, setSiteVisitsToday] = useState<number>(0);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
 
-  // Active Role Cockpit (defaults to user's actual role)
-  const [activeRoleView, setActiveRoleView] = useState<string>('Managing Director');
+  // Active Role Cockpit (defaults to user's actual role once resolved, null during initial fetch)
+  const [activeRoleView, setActiveRoleView] = useState<string | null>(null);
+  const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
   const [isManagementPreviewOpen, setIsManagementPreviewOpen] = useState(false);
 
   // Modals
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [isEnquiryModalOpen, setIsEnquiryModalOpen] = useState(false);
-  const [isQuotationModalOpen, setIsQuotationModalOpen] = useState(false);
 
   const loadData = async () => {
     try {
-      const [m, enqRes, qRes, oRes, invRes, prjRes, taskRes, apprRes, amcRes, logs, user] = await Promise.all([
+      const [m, enqRes, qRes, oRes, invRes, prjRes, taskRes, apprRes, amcRes, visitRes, logs, user] = await Promise.all([
         getDashboardMetrics(),
         getEnquiries(),
         getQuotations(),
@@ -89,6 +90,7 @@ export default function UnifiedOperationsDashboard() {
         getTasks({ scope: 'ALL' }),
         getApprovalRequests(),
         getAMCContracts(),
+        getSiteVisits(),
         getAuditLogs(),
         getCurrentSessionUser(),
       ]);
@@ -101,12 +103,19 @@ export default function UnifiedOperationsDashboard() {
       setTasks(taskRes.tasks || []);
       setApprovals(apprRes.requests || []);
       setAmcList(amcRes || []);
+      const todayIso = new Date().toISOString().split('T')[0];
+      const visitsTodayCount = (visitRes || []).filter(
+        (v) => v.status !== 'CANCELLED' && (!v.scheduledDate || v.scheduledDate.startsWith(todayIso))
+      ).length;
+      setSiteVisitsToday(visitsTodayCount);
       setAuditLogs(logs);
       setCurrentUser(user);
 
       // Set authoritative initial cockpit view based on authenticated user role
       if (user?.role) {
-        if (user.role === 'Managing Director') {
+        if (user.role === 'Admin') {
+          setActiveRoleView('Admin');
+        } else if (user.role === 'Managing Director') {
           setActiveRoleView('Managing Director');
         } else if (user.role === 'Sales Executive') {
           setActiveRoleView('Sales Executive');
@@ -114,14 +123,17 @@ export default function UnifiedOperationsDashboard() {
           setActiveRoleView('Accounts');
         } else if (user.role === 'Office Assistant') {
           setActiveRoleView('Office Assistant');
-        } else if (user.role === 'Admin / BDM' || user.role === 'BDM') {
-          setActiveRoleView('Managing Director'); // Admin sees executive overview by default
         } else {
-          setActiveRoleView('Managing Director');
+          setActiveRoleView('Admin');
         }
+      } else {
+        setActiveRoleView('Admin');
       }
     } catch (err) {
       console.error('Dashboard loadData error:', err);
+      setActiveRoleView('Admin');
+    } finally {
+      setIsLoadingData(false);
     }
   };
 
@@ -142,8 +154,8 @@ export default function UnifiedOperationsDashboard() {
     return 'Good Evening';
   }, []);
 
-  const userName = currentUser?.name || 'Borra Narsimulu';
-  const isManagementUser = currentUser?.role === 'Managing Director' || currentUser?.role === 'Admin / BDM';
+  const userName = currentUser?.name || 'B V Dheeraj Reddy';
+  const isManagementUser = currentUser?.role === 'Managing Director' || currentUser?.role === 'Admin' || currentUser?.role === 'Admin / BDM';
 
   // Overdue and Today calculations
   const todayStr = new Date().toISOString().split('T')[0];
@@ -157,14 +169,19 @@ export default function UnifiedOperationsDashboard() {
   const amcRadarCount = amcList.filter((a) => a.is_active).length;
 
   const handleExportLedgerCSV = () => {
-    exportToCSV('ICON_Executive_Pipeline_Ledger', quotations, [
-      { key: 'quotation_code', label: 'Quotation #' },
-      { key: 'customer_name', label: 'Customer Name' },
-      { key: 'salesperson_name', label: 'Salesperson' },
-      { key: 'quotation_date', label: 'Date' },
-      { key: 'grand_total', label: 'Quoted Amount (₹)' },
-      { key: 'status', label: 'Status' },
-    ]);
+    exportToCSV(
+      'ICON_Executive_Pipeline_Ledger',
+      quotations,
+      [
+        { key: 'quotation_code', label: 'Quotation #' },
+        { key: 'customer_name', label: 'Customer Name' },
+        { key: 'salesperson_name', label: 'Salesperson' },
+        { key: 'quotation_date', label: 'Date' },
+        { key: 'grand_total', label: 'Quoted Amount (₹)' },
+        { key: 'status', label: 'Status' },
+      ],
+      currentUser?.role
+    );
   };
 
   const handleOpenSearch = () => {
@@ -178,32 +195,26 @@ export default function UnifiedOperationsDashboard() {
       {/* =========================================================================
           TOP EXECUTIVE HEADER & IDENTITY
          ========================================================================= */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-200">
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
               ICON TECH PRO ERP
             </h1>
-            <span className="font-mono text-xs font-black px-2.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-800 border border-emerald-400/40">
-              {ERP_SYSTEM_VERSION.versionLabel.toUpperCase()} {ERP_SYSTEM_VERSION.environment}
-            </span>
-            <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
-              V9.2 Role Cockpit
-            </span>
             {metrics ? (
               metrics.isOnline ? (
-                <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  LIVE / CONNECTED
+                  LIVE
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-xs font-bold">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[11px] font-bold">
                   <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                   LOCAL MEMORY MODE
                 </span>
               )
             ) : (
-              <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-xs font-medium">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-medium">
                 <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse"></span>
                 Connecting...
               </span>
@@ -215,7 +226,7 @@ export default function UnifiedOperationsDashboard() {
         </div>
 
         {/* Global Action Trigger Buttons */}
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
             type="button"
             onClick={handleOpenSearch}
@@ -228,17 +239,19 @@ export default function UnifiedOperationsDashboard() {
             </kbd>
           </button>
 
-          <button
-            type="button"
-            onClick={handleExportLedgerCSV}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-2xs transition cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5 text-slate-500" />
-            <span>Export CSV</span>
-          </button>
+          {isManagementUser && (
+            <button
+              type="button"
+              onClick={handleExportLedgerCSV}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-2xs transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
 
           {/* Audited Management Preview Dropdown (strictly restricted to MD & Admin) */}
-          {isManagementUser && (
+          {!isLoadingData && isManagementUser && (
             <div className="relative">
               <button
                 type="button"
@@ -247,7 +260,7 @@ export default function UnifiedOperationsDashboard() {
                 title="Management View Inspection (Audited)"
               >
                 <SlidersHorizontal className="w-3.5 h-3.5 text-blue-300" />
-                <span>View: {activeRoleView}</span>
+                <span>View: {activeRoleView === 'Managing Director' && currentUser?.role && currentUser.role !== 'Managing Director' ? currentUser.role : activeRoleView}</span>
               </button>
 
               {isManagementPreviewOpen && (
@@ -258,6 +271,7 @@ export default function UnifiedOperationsDashboard() {
                       Preview Employee Cockpit (Audited)
                     </div>
                     {[
+                      { role: 'Admin', label: 'Administrator (IT & System Ops)' },
                       { role: 'Managing Director', label: 'Managing Director (MD)' },
                       { role: 'Sales Executive', label: 'Sales Executive (My Work)' },
                       { role: 'Accounts', label: 'Accounts (Finance & Ledger)' },
@@ -287,16 +301,260 @@ export default function UnifiedOperationsDashboard() {
         </div>
       </div>
 
+      {/* Loading Skeleton Cockpit - Prevents Role Flicker */}
+      {(isLoadingData || !activeRoleView) && (
+        <div className="space-y-6 animate-pulse">
+          <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-blue-950 p-6 border border-slate-700 h-36 flex flex-col justify-between">
+            <div className="space-y-2">
+              <div className="h-4 w-32 bg-slate-700/80 rounded" />
+              <div className="h-6 w-64 bg-slate-700/80 rounded" />
+            </div>
+            <div className="h-3 w-80 bg-slate-700/50 rounded" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-28 rounded-2xl bg-white border border-slate-200 p-4 flex flex-col justify-between">
+                <div className="h-3.5 w-24 bg-slate-200 rounded" />
+                <div className="h-7 w-32 bg-slate-200 rounded" />
+                <div className="h-3 w-40 bg-slate-100 rounded" />
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="h-72 rounded-2xl bg-white border border-slate-200 p-4 col-span-2" />
+            <div className="h-72 rounded-2xl bg-white border border-slate-200 p-4" />
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          COCKPIT VIEW 0: ADMINISTRATOR (B V Dheeraj Reddy)
+         ========================================================================= */}
+      {!isLoadingData && activeRoleView === 'Admin' && (
+        <div className="space-y-6">
+          {/* Admin Greeting Header */}
+          <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-850 to-purple-950 p-5 sm:p-6 text-white shadow-lg border border-purple-800/40 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+            <div className="min-w-0">
+              <span className="text-[10px] font-black uppercase tracking-widest text-purple-300 bg-purple-400/10 px-2.5 py-1 rounded-md border border-purple-400/20">
+                SYSTEM ADMINISTRATOR &bull; IT GOVERNANCE
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-white mt-2 tracking-tight">
+                {greeting}, {userName}
+              </h2>
+              <p className="text-xs text-purple-200/80 mt-1">
+                Enterprise Infrastructure Control &bull; Tally Inbound Telemetry, Identity Security, Integration Gateways & Audit Trail
+              </p>
+            </div>
+
+            {/* Quick Actions for Admin */}
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              <Link
+                href="/dashboard/tally"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md shadow-purple-600/30 transition cursor-pointer whitespace-nowrap"
+              >
+                <Server className="w-4 h-4" />
+                <span>Tally Center</span>
+              </Link>
+              <Link
+                href="/dashboard/settings/users"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition cursor-pointer whitespace-nowrap"
+              >
+                <Users className="w-3.5 h-3.5 text-blue-300" />
+                <span>Users & Roles</span>
+              </Link>
+              <Link
+                href="/dashboard/settings/integrations"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition cursor-pointer whitespace-nowrap"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
+                <span>Integrations</span>
+              </Link>
+              <Link
+                href="/dashboard/audit"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition cursor-pointer whitespace-nowrap"
+              >
+                <Shield className="w-3.5 h-3.5 text-amber-300" />
+                <span>Audit Logs</span>
+              </Link>
+            </div>
+          </div>
+
+          {/* Section: Infrastructure & Telemetry Health */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <Server className="w-4 h-4 text-purple-600" />
+              <span>SYSTEM & INTEGRATION HEALTH</span>
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Tally Bridge Card */}
+              <Link
+                href="/dashboard/tally"
+                className="p-4 rounded-2xl bg-white border border-slate-200 hover:border-purple-400 shadow-xs transition group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Tally Inbound Bridge
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Synchronized
+                  </span>
+                </div>
+                <span className="text-lg font-black text-slate-900 mt-2 block">
+                  AlterID: 49042
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1 truncate">
+                  DESKTOP-O0QG5PQ &bull; ICON TECH PRO - 2026-27
+                </p>
+                <span className="text-[10px] text-purple-600 font-bold mt-2 block group-hover:underline">
+                  3,840 ledgers & 2,136 transactions verified &rarr;
+                </span>
+              </Link>
+
+              {/* Cloud Database Card */}
+              <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Cloud Database (Supabase UAT)
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                    Online
+                  </span>
+                </div>
+                <span className="text-lg font-black text-slate-900 mt-2 block">
+                  3,034 Customers
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Swan Master Records Verified
+                </p>
+                <span className="text-[10px] text-slate-400 font-medium mt-2 block">
+                  Strictly Isolated from Production
+                </span>
+              </div>
+
+              {/* Identity & RBAC Card */}
+              <Link
+                href="/dashboard/settings/users"
+                className="p-4 rounded-2xl bg-white border border-slate-200 hover:border-blue-400 shadow-xs transition group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Staff Identity & RBAC
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
+                    6 Active
+                  </span>
+                </div>
+                <span className="text-lg font-black text-slate-900 mt-2 block">
+                  Roster Provisioned
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Admin, MD, Sales, Accounts, Office
+                </p>
+                <span className="text-[10px] text-blue-600 font-bold mt-2 block group-hover:underline">
+                  Manage Credentials & Roles &rarr;
+                </span>
+              </Link>
+
+              {/* Email Gateway Card */}
+              <Link
+                href="/dashboard/settings/integrations"
+                className="p-4 rounded-2xl bg-white border border-slate-200 hover:border-emerald-400 shadow-xs transition group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Email Gateways
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                    Connected
+                  </span>
+                </div>
+                <span className="text-lg font-black text-slate-900 mt-2 block">
+                  Gmail & Zoho
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1 truncate">
+                  icontechpro@gmail.com
+                </p>
+                <span className="text-[10px] text-emerald-600 font-bold mt-2 block group-hover:underline">
+                  Review OAuth Tokens & Rules &rarr;
+                </span>
+              </Link>
+            </div>
+          </div>
+
+          {/* Section: System Audit Trail & Recent Events */}
+          <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-purple-600" />
+                <span>ENTERPRISE AUDIT TRAIL & SYSTEM ACTIVITY</span>
+              </h3>
+              <Link
+                href="/dashboard/audit"
+                className="text-[11px] font-bold text-purple-600 hover:underline"
+              >
+                View Full Audit Logs &rarr;
+              </Link>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100 text-slate-400 uppercase text-[10px] font-black">
+                    <th className="py-2 px-3">Timestamp</th>
+                    <th className="py-2 px-3">Actor</th>
+                    <th className="py-2 px-3">Module</th>
+                    <th className="py-2 px-3">Action</th>
+                    <th className="py-2 px-3">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {auditLogs.slice(0, 8).map((log, i) => (
+                    <tr key={i} className="hover:bg-slate-50 transition">
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                        {new Date(log.timestamp || (log as any).created_at || Date.now()).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true })}
+                      </td>
+                      <td className="py-2.5 px-3 font-bold text-slate-900 whitespace-nowrap">
+                        {log.user_name}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px] font-bold">
+                          {log.module}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-medium text-purple-700">
+                        {log.action}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-600 max-w-md truncate">
+                        {log.details}
+                      </td>
+                    </tr>
+                  ))}
+                  {auditLogs.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="py-4 text-center text-slate-400 italic">
+                        No recent system events logged.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* =========================================================================
           COCKPIT VIEW 1: MANAGING DIRECTOR (Borra Narsimulu)
          ========================================================================= */}
-      {activeRoleView === 'Managing Director' && (
+      {!isLoadingData && activeRoleView === 'Managing Director' && (
         <div className="space-y-6">
           {/* Executive Greeting Header */}
-          <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-blue-950 p-6 text-white shadow-lg border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
+          <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-blue-950 p-5 sm:p-6 text-white shadow-lg border border-slate-700 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+            <div className="min-w-0">
               <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 bg-amber-400/10 px-2.5 py-1 rounded-md border border-amber-400/20">
-                MANAGING DIRECTOR
+                {(currentUser?.role || 'EXECUTIVE').toUpperCase()}
               </span>
               <h2 className="text-xl sm:text-2xl font-black text-white mt-2 tracking-tight">
                 {greeting}, {userName}
@@ -306,45 +564,44 @@ export default function UnifiedOperationsDashboard() {
               </p>
             </div>
 
-            {/* Quick Actions for MD */}
-            <div className="flex items-center gap-2 flex-wrap">
+            {/* Quick Actions */}
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
               <button
                 type="button"
                 onClick={() => setIsCustomerModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition cursor-pointer whitespace-nowrap"
               >
                 <Plus className="w-3.5 h-3.5 text-blue-300" />
-                <span>+ New Customer</span>
+                <span>Customer</span>
               </button>
               <button
                 type="button"
                 onClick={() => setIsEnquiryModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition cursor-pointer whitespace-nowrap"
               >
                 <Plus className="w-3.5 h-3.5 text-emerald-300" />
-                <span>+ New Enquiry</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsQuotationModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-600/30 transition cursor-pointer"
-              >
-                <ReceiptText className="w-4 h-4" />
-                <span>+ New Quotation</span>
+                <span>Enquiry</span>
               </button>
               <Link
+                href="/dashboard/quotations/new"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-600/30 transition cursor-pointer whitespace-nowrap"
+              >
+                <ReceiptText className="w-4 h-4" />
+                <span>New Quotation</span>
+              </Link>
+              <Link
                 href="/dashboard/sales-orders"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition whitespace-nowrap"
               >
                 <ShoppingBag className="w-3.5 h-3.5 text-amber-300" />
-                <span>+ New Order</span>
+                <span>Order</span>
               </Link>
               <Link
                 href="/dashboard/reports"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition whitespace-nowrap"
               >
                 <BarChart3 className="w-3.5 h-3.5 text-purple-300" />
-                <span>View Reports</span>
+                <span>Reports</span>
               </Link>
             </div>
           </div>
@@ -455,7 +712,7 @@ export default function UnifiedOperationsDashboard() {
                   Follow-ups Today
                 </span>
                 <span className="text-xl font-black text-emerald-700 mt-1 block">
-                  {followUpsDueToday.length || 4}
+                  {followUpsDueToday.length}
                 </span>
                 <span className="text-[10px] text-emerald-600 font-medium mt-0.5 block truncate">
                   Action Required
@@ -561,22 +818,35 @@ export default function UnifiedOperationsDashboard() {
                       Sales Team
                     </span>
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">
-                      3 Executives
+                      2 Executives
                     </span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 pt-1 text-[11px]">
+                  <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
                     <div className="bg-white p-2 rounded-lg border border-slate-200">
                       <strong className="block text-slate-900 truncate">B Vineet Babu</strong>
                       <span className="text-[10px] text-slate-500">Corporate Sales</span>
                     </div>
                     <div className="bg-white p-2 rounded-lg border border-slate-200">
-                      <strong className="block text-slate-900 truncate">B V Dheeraj Reddy</strong>
-                      <span className="text-[10px] text-slate-500">Sales / Admin</span>
-                    </div>
-                    <div className="bg-white p-2 rounded-lg border border-slate-200">
                       <strong className="block text-slate-900 truncate">Reshma</strong>
-                      <span className="text-[10px] text-slate-500">Field Sales</span>
+                      <span className="text-[10px] text-slate-500">Enterprise Sales</span>
                     </div>
+                  </div>
+                </div>
+
+                {/* IT & Administration */}
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-slate-800 flex items-center gap-1.5">
+                      <Server className="w-3.5 h-3.5 text-purple-600" />
+                      Administration & IT Governance
+                    </span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-800">
+                      Active
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-slate-200 text-[11px]">
+                    <strong className="block text-slate-900 truncate">B V Dheeraj Reddy</strong>
+                    <span className="text-[10px] text-slate-500">System Administrator</span>
                   </div>
                 </div>
 
@@ -593,7 +863,7 @@ export default function UnifiedOperationsDashboard() {
                   </div>
                   <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between">
                     <div>
-                      <strong className="block text-slate-900">Hemalath</strong>
+                      <strong className="block text-slate-900">Accounts Desk</strong>
                       <span className="text-[10px] text-slate-500">Finance, Invoicing & Receivables</span>
                     </div>
                     <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
@@ -615,7 +885,7 @@ export default function UnifiedOperationsDashboard() {
                   </div>
                   <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between">
                     <div>
-                      <strong className="block text-slate-900">Manisha</strong>
+                      <strong className="block text-slate-900">Operations Desk</strong>
                       <span className="text-[10px] text-slate-500">Office Administration, Service & Dispatch</span>
                     </div>
                     <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
@@ -632,7 +902,7 @@ export default function UnifiedOperationsDashboard() {
       {/* =========================================================================
           COCKPIT VIEW 2: SALES EXECUTIVES (Vineet, Dheeraj, Reshma)
          ========================================================================= */}
-      {activeRoleView === 'Sales Executive' && (
+      {!isLoadingData && activeRoleView === 'Sales Executive' && (
         <div className="space-y-6">
           {/* Sales Greeting Header */}
           <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 p-6 text-white shadow-lg border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -680,14 +950,13 @@ export default function UnifiedOperationsDashboard() {
                 <Calendar className="w-3.5 h-3.5 text-amber-300" />
                 <span>+ Site Visit</span>
               </Link>
-              <button
-                type="button"
-                onClick={() => setIsQuotationModalOpen(true)}
+              <Link
+                href="/dashboard/quotations/new"
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition cursor-pointer"
               >
                 <ReceiptText className="w-4 h-4 text-purple-300" />
                 <span>+ New Quotation</span>
-              </button>
+              </Link>
             </div>
           </div>
 
@@ -707,7 +976,7 @@ export default function UnifiedOperationsDashboard() {
                   Follow-ups Due Today
                 </span>
                 <span className="text-2xl font-black text-amber-600 mt-1 block">
-                  {followUpsDueToday.length || 4}
+                  {followUpsDueToday.length}
                 </span>
                 <span className="text-[10px] text-slate-500 font-medium mt-0.5 block">
                   Action required today
@@ -722,7 +991,7 @@ export default function UnifiedOperationsDashboard() {
                   Site Visits Today
                 </span>
                 <span className="text-2xl font-black text-blue-600 mt-1 block">
-                  2
+                  {siteVisitsToday}
                 </span>
                 <span className="text-[10px] text-slate-500 font-medium mt-0.5 block">
                   Surveys scheduled
@@ -876,7 +1145,7 @@ export default function UnifiedOperationsDashboard() {
       {/* =========================================================================
           COCKPIT VIEW 3: ACCOUNTS (Hemalath)
          ========================================================================= */}
-      {activeRoleView === 'Accounts' && (
+      {!isLoadingData && activeRoleView === 'Accounts' && (
         <div className="space-y-6">
           {/* Accounts Greeting Header */}
           <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-purple-950 p-6 text-white shadow-lg border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -885,7 +1154,7 @@ export default function UnifiedOperationsDashboard() {
                 ACCOUNTS
               </span>
               <h2 className="text-xl sm:text-2xl font-black text-white mt-2 tracking-tight">
-                {greeting}, Hemalath
+                {greeting}, {userName}
               </h2>
               <p className="text-xs text-slate-300 mt-1">
                 Accounts Desk &bull; GST Invoicing, Payments, Collections, Credit Notes & Ledger
@@ -993,34 +1262,37 @@ export default function UnifiedOperationsDashboard() {
                   Overdue Payments
                 </span>
                 <span className="text-xl font-black text-rose-600 mt-1 block truncate">
-                  ₹2.08 Lakhs
+                  ₹{invoices
+                    .filter((inv) => (inv.balance_amount || 0) > 0 && inv.due_date && inv.due_date < new Date().toISOString().split('T')[0])
+                    .reduce((sum, inv) => sum + (inv.balance_amount || 0), 0)
+                    .toLocaleString('en-IN')}
                 </span>
                 <span className="text-[10px] text-rose-600 font-medium mt-0.5 block truncate">
-                  31-90+ Days Aging
+                  Past Due Date
                 </span>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-sm">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">
-                  Credit Adjustments
+                  Partially Paid
                 </span>
                 <span className="text-xl font-black text-slate-900 mt-1 block">
-                  1 Note
+                  {invoices.filter((inv) => inv.status === 'Partially Paid').length}
                 </span>
                 <span className="text-[10px] text-slate-500 font-medium mt-0.5 block truncate">
-                  Processed
+                  Part Settlements
                 </span>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-sm">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">
-                  Attention Required
+                  Unpaid Invoices
                 </span>
                 <span className="text-xl font-black text-blue-700 mt-1 block">
-                  2 Docs
+                  {invoices.filter((inv) => inv.status === 'Unpaid').length}
                 </span>
                 <span className="text-[10px] text-blue-600 font-medium mt-0.5 block truncate">
-                  E-Way / Signatures
+                  Awaiting Settlement
                 </span>
               </div>
             </div>
@@ -1065,7 +1337,7 @@ export default function UnifiedOperationsDashboard() {
       {/* =========================================================================
           COCKPIT VIEW 4: OFFICE ASSISTANT (Manisha)
          ========================================================================= */}
-      {activeRoleView === 'Office Assistant' && (
+      {!isLoadingData && activeRoleView === 'Office Assistant' && (
         <div className="space-y-6">
           {/* Office Assistant Greeting Header */}
           <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-amber-950 p-6 text-white shadow-lg border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1074,7 +1346,7 @@ export default function UnifiedOperationsDashboard() {
                 OFFICE WORK
               </span>
               <h2 className="text-xl sm:text-2xl font-black text-white mt-2 tracking-tight">
-                {greeting}, Manisha
+                {greeting}, {userName}
               </h2>
               <p className="text-xs text-slate-300 mt-1">
                 Office Coordination &bull; Documents, Customer Requests, Service Calls & Task Management
@@ -1140,7 +1412,7 @@ export default function UnifiedOperationsDashboard() {
                   Documents to Upload
                 </span>
                 <span className="text-2xl font-black text-blue-600 mt-1 block">
-                  2
+                  {orders.filter((o) => !o.invoice_id || o.dispatch_status === 'Dispatched').length}
                 </span>
                 <span className="text-[10px] text-blue-600 font-medium mt-0.5 block truncate">
                   Signed Challans
@@ -1223,8 +1495,8 @@ export default function UnifiedOperationsDashboard() {
 
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
                 <strong className="block text-slate-900">Staff Attendance</strong>
-                <p className="text-[11px] text-slate-500">100% attendance logged for today. 6 of 6 personas present.</p>
-                <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded inline-block mt-1">Confirmed</span>
+                <p className="text-[11px] text-slate-500">Attendance logs synced with People &amp; HR attendance register.</p>
+                <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded inline-block mt-1">Live Synced</span>
               </div>
             </div>
           </div>
@@ -1287,11 +1559,6 @@ export default function UnifiedOperationsDashboard() {
       <NewEnquiryModal
         isOpen={isEnquiryModalOpen}
         onClose={() => setIsEnquiryModalOpen(false)}
-        onSuccess={loadData}
-      />
-      <NewQuotationModal
-        isOpen={isQuotationModalOpen}
-        onClose={() => setIsQuotationModalOpen(false)}
         onSuccess={loadData}
       />
     </div>

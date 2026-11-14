@@ -21,9 +21,13 @@ import { PrintInvoiceModal } from '@/components/modals/PrintInvoiceModal';
 import { RecordPaymentModal } from '@/components/modals/RecordPaymentModal';
 import { PaymentReminderModal } from '@/components/modals/PaymentReminderModal';
 import { exportToCSV } from '@/lib/utils/export';
+import { getCurrentSessionUser } from '@/lib/actions/users';
+import { canExportCSV } from '@/lib/permissions/registry';
 import type { Invoice, Payment } from '@/types/erp';
+import type { AuthenticatedUser } from '@/lib/auth/session';
 
 export default function InvoicesPage() {
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [totalReceivables, setTotalReceivables] = useState(0);
@@ -48,6 +52,10 @@ export default function InvoicesPage() {
     const payRes = await getPayments();
     setPayments(payRes.payments);
   };
+
+  useEffect(() => {
+    getCurrentSessionUser().then(setCurrentUser);
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -98,27 +106,37 @@ export default function InvoicesPage() {
 
   const handleExportCSV = () => {
     if (activeTab === 'invoices') {
-      exportToCSV('ICON_Tax_Invoices', invoices, [
-        { key: 'invoice_number', label: 'Invoice #' },
-        { key: 'customer_name', label: 'Customer Name' },
-        { key: 'company_name', label: 'Company Name' },
-        { key: 'gstin', label: 'GSTIN' },
-        { key: 'invoice_date', label: 'Invoice Date' },
-        { key: 'due_date', label: 'Due Date' },
-        { key: 'grand_total', label: 'Grand Total (₹)' },
-        { key: 'paid_amount', label: 'Amount Paid (₹)' },
-        { key: 'balance_amount', label: 'Balance Due (₹)' },
-        { key: 'status', label: 'Status' },
-      ]);
+      exportToCSV(
+        'ICON_Tax_Invoices',
+        invoices,
+        [
+          { key: 'invoice_number', label: 'Invoice #' },
+          { key: 'customer_name', label: 'Customer Name' },
+          { key: 'company_name', label: 'Company Name' },
+          { key: 'gstin', label: 'GSTIN' },
+          { key: 'invoice_date', label: 'Invoice Date' },
+          { key: 'due_date', label: 'Due Date' },
+          { key: 'grand_total', label: 'Grand Total (₹)' },
+          { key: 'paid_amount', label: 'Amount Paid (₹)' },
+          { key: 'balance_amount', label: 'Balance Due (₹)' },
+          { key: 'status', label: 'Status' },
+        ],
+        currentUser?.role
+      );
     } else {
-      exportToCSV('ICON_Payment_Receipts', payments, [
-        { key: 'payment_number', label: 'Receipt #' },
-        { key: 'invoice_id', label: 'Invoice Ref' },
-        { key: 'amount', label: 'Amount Received (₹)' },
-        { key: 'mode', label: 'Mode' },
-        { key: 'reference_number', label: 'UTR / Cheque #' },
-        { key: 'payment_date', label: 'Payment Date' },
-      ]);
+      exportToCSV(
+        'ICON_Payment_Receipts',
+        payments,
+        [
+          { key: 'payment_number', label: 'Receipt #' },
+          { key: 'invoice_id', label: 'Invoice Ref' },
+          { key: 'amount', label: 'Amount Received (₹)' },
+          { key: 'mode', label: 'Mode' },
+          { key: 'reference_number', label: 'UTR / Cheque #' },
+          { key: 'payment_date', label: 'Payment Date' },
+        ],
+        currentUser?.role
+      );
     }
   };
 
@@ -142,14 +160,16 @@ export default function InvoicesPage() {
 
         {/* Tab Selector & Export */}
         <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
-          >
-            <Download className="w-4 h-4 text-slate-500" />
-            <span>Export CSV</span>
-          </button>
+          {canExportCSV(currentUser?.role) && (
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
           <div className="flex items-center gap-1 p-1 bg-slate-200/70 rounded-xl text-xs font-bold">
             <button
               onClick={() => setActiveTab('invoices')}

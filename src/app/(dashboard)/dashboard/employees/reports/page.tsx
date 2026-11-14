@@ -6,7 +6,6 @@ import {
   CreditCard,
   HardHat,
   Users,
-  Download,
   ArrowLeft,
   FileSpreadsheet,
 } from 'lucide-react';
@@ -14,6 +13,7 @@ import { getAuthenticatedUser } from '@/lib/auth/session';
 import { getEmployees } from '@/lib/actions/employees';
 import { getAttendance } from '@/lib/actions/attendance';
 import { getSalaries, getPayrollRuns } from '@/lib/actions/payroll';
+import { HRExportButton } from '@/components/employees/HRExportButton';
 
 export const metadata = {
   title: 'HR Reports & Analytics | ICON TECH PRO ERP',
@@ -72,14 +72,7 @@ export default async function HRReportsPage() {
               <Calendar className="w-4 h-4 text-indigo-600" />
               <h3 className="text-sm font-bold text-slate-900">Attendance & Site Deployment Log</h3>
             </div>
-            <button
-              type="button"
-              onClick={undefined}
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Export CSV</span>
-            </button>
+            <HRExportButton records={attendance} />
           </div>
 
           <p className="text-xs text-slate-500">
@@ -99,7 +92,14 @@ export default async function HRReportsPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-slate-600">Average Daily Shift</span>
-              <span className="font-bold text-emerald-700">8.8 Hours</span>
+              <span className="font-bold text-emerald-700">
+                {attendance.length > 0
+                  ? `${(
+                      attendance.reduce((sum, a) => sum + Number(a.total_hours || 0), 0) /
+                      attendance.length
+                    ).toFixed(1)} Hours`
+                  : '0.0 Hours'}
+              </span>
             </div>
           </div>
         </div>

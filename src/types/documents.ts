@@ -56,3 +56,68 @@ export interface DocumentFilter {
   expiringWithinDays?: number;
   folder_path?: string;
 }
+
+export type BusinessDocumentType =
+  | 'QUOTATION'
+  | 'QUOTATION_REVISION'
+  | 'PROFORMA_INVOICE'
+  | 'DELIVERY_CHALLAN'
+  | 'TAX_INVOICE'
+  | 'PURCHASE_ORDER'
+  | 'PAYMENT_RECEIPT'
+  | 'CONTRACT'
+  | 'CORRESPONDENCE'
+  | 'SIGNED_DOCUMENT'
+  | 'OTHER';
+
+export interface SignedDocumentRecord {
+  id: string;
+  document_type: BusinessDocumentType;
+  document_number: string;
+  customer_id: string;
+  customer_name: string;
+  company_name?: string;
+  related_transaction_id?: string;
+  related_transaction_number?: string;
+  original_generated_pdf_url?: string;
+  signed_scan_file_url: string;
+  signed_scan_file_name: string;
+  file_size_bytes: number;
+  mime_type: string;
+  signed_date: string;
+  uploaded_at: string;
+  uploaded_by_id?: string;
+  uploaded_by_name: string;
+  signer_name?: string;
+  signer_designation?: string;
+  has_company_stamp: boolean;
+  version: number;
+  notes?: string;
+  audit_history?: Array<{
+    action: string;
+    timestamp: string;
+    actor: string;
+    details: string;
+  }>;
+}
+
+export interface CustomerArchiveDocument {
+  id: string;
+  document_type: BusinessDocumentType;
+  document_number: string;
+  title: string;
+  date: string;
+  amount?: number;
+  status: string;
+  customer_id: string;
+  customer_name: string;
+  related_transaction_number?: string;
+  original_pdf_url?: string;
+  signed_scan_url?: string;
+  has_signed_copy: boolean;
+  version: number;
+  uploaded_by_name: string;
+  uploaded_at: string;
+  notes?: string;
+}
+

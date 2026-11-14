@@ -11,7 +11,8 @@ import type { ManagedUser, ERPModule, PermissionAction } from '@/types/rbac';
 
 export async function onboardEmployee(data: {
   full_name: string;
-  corporate_email: string;
+  login_email?: string;
+  corporate_email?: string;
   phone: string;
   department: string;
   designation: string;
@@ -28,23 +29,32 @@ export async function onboardEmployee(data: {
   success: boolean;
   employee?: Employee;
   user?: ManagedUser;
+  inviteLink?: string;
   error?: string;
 }> {
   try {
     const actor = await requireRole(['Managing Director', 'Admin / BDM']);
 
     const cleanName = data.full_name.trim();
-    const cleanEmail = data.corporate_email.trim().toLowerCase();
+    const cleanLoginEmail = (data.login_email || data.corporate_email || '').trim().toLowerCase();
+    const cleanCorporateEmail = data.corporate_email?.trim().toLowerCase() || undefined;
     const cleanPhone = data.phone.trim();
 
+    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
     if (!cleanName) return { success: false, error: 'Full Name is required.' };
-    if (!cleanEmail.includes('@')) return { success: false, error: 'Valid corporate email is required.' };
+    if (!EMAIL_REGEX.test(cleanLoginEmail)) {
+      return { success: false, error: 'A valid email address is required for ERP Login Email.' };
+    }
+    if (cleanCorporateEmail && !EMAIL_REGEX.test(cleanCorporateEmail)) {
+      return { success: false, error: 'Corporate email format is invalid.' };
+    }
     if (!cleanPhone) return { success: false, error: 'Mobile phone number is required.' };
 
     // 1. Create HR Employee Record
     const empRes = await createEmployee({
       full_name: cleanName,
-      corporate_email: cleanEmail,
+      corporate_email: cleanCorporateEmail || cleanLoginEmail,
       phone: cleanPhone,
       department: data.department || 'Commercial Sales',
       designation: data.designation || data.role,
@@ -61,7 +71,8 @@ export async function onboardEmployee(data: {
     // 2. Create ERP User Account
     const userRes = await createManagedUser({
       name: cleanName,
-      email: cleanEmail,
+      email: cleanLoginEmail,
+      corporate_email: cleanCorporateEmail,
       phone: cleanPhone,
       role: data.role,
       department: data.department || 'Commercial Sales',
@@ -95,7 +106,7 @@ export async function onboardEmployee(data: {
       userName: actor.name,
       action: 'EMPLOYEE_ONBOARDED',
       module: 'USER_MANAGEMENT',
-      details: `Onboarded new employee ${cleanName} (${cleanEmail}) with Employee ID ${empRes.employee.employee_id} and role '${data.role}'`,
+      details: `Onboarded new employee ${cleanName} (${cleanLoginEmail}) with Employee ID ${empRes.employee.employee_id} and role '${data.role}'`,
     });
 
     revalidatePath('/dashboard/employees');
@@ -106,6 +117,7 @@ export async function onboardEmployee(data: {
       success: true,
       employee: empRes.employee,
       user: userRes.data,
+      inviteLink: userRes.inviteLink,
     };
   } catch (err: any) {
     return { success: false, error: err.message || 'Onboarding failed' };

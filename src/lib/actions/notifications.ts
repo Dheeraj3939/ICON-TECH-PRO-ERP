@@ -4,7 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { requireAuth } from '@/lib/auth/session';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { createClient } from '@/lib/supabase/server';
+import { isUuid } from '@/lib/supabase/db-helpers';
+import { EmailService } from '@/lib/email/email-service';
 import type {
   EnterpriseNotification,
   NotificationCategory,
@@ -89,11 +90,14 @@ export async function getNotifications(unreadOnly = false): Promise<EnterpriseNo
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      let query = supabase.from('enterprise_notifications').select('*');
+      const admin = createAdminClient();
+      let query = admin.from('enterprise_notifications').select('*');
 
       if (authUser.role !== 'Managing Director' && authUser.role !== 'Admin / BDM') {
-        query = query.or(`user_role.eq.${authUser.role},user_role.is.null,user_id.eq.${authUser.id}`);
+        const userOrClause = isUuid(authUser.id)
+          ? `user_role.eq.${authUser.role},user_role.is.null,user_id.eq.${authUser.id}`
+          : `user_role.eq.${authUser.role},user_role.is.null`;
+        query = query.or(userOrClause);
       }
 
       if (unreadOnly) {
@@ -101,26 +105,24 @@ export async function getNotifications(unreadOnly = false): Promise<EnterpriseNo
       }
 
       const { data, error } = await query.order('created_at', { ascending: false }).limit(20);
-      if (!error && data && data.length > 0) {
-        results = data as EnterpriseNotification[];
+      if (!error && data) {
+        return data as EnterpriseNotification[];
       }
     } catch {
       // In-memory fallback
     }
   }
 
-  if (results.length === 0) {
-    results = store.filter((n) => {
-      if (authUser.role === 'Managing Director' || authUser.role === 'Admin / BDM') return true;
-      if (!n.user_role) return true;
-      if (n.user_role === authUser.role) return true;
-      if (n.user_id === authUser.id) return true;
-      return false;
-    });
+  results = store.filter((n) => {
+    if (authUser.role === 'Managing Director' || authUser.role === 'Admin / BDM') return true;
+    if (!n.user_role) return true;
+    if (n.user_role === authUser.role) return true;
+    if (n.user_id === authUser.id) return true;
+    return false;
+  });
 
-    if (unreadOnly) {
-      results = results.filter((n) => !n.is_read);
-    }
+  if (unreadOnly) {
+    results = results.filter((n) => !n.is_read);
   }
 
   return results;
@@ -139,8 +141,8 @@ export async function markNotificationRead(id: string): Promise<{ success: boole
 
   if (await isSupabaseAvailable()) {
     try {
-      const supabase = await createClient();
-      await supabase.from('enterprise_notifications').update({ is_read: true }).eq('id', id);
+      const admin = createAdminClient();
+      await admin.from('enterprise_notifications').update({ is_read: true }).eq('id', id);
     } catch {
       // Ignore
     }
@@ -158,15 +160,22 @@ export async function markAllNotificationsRead(): Promise<{ success: boolean }> 
   const store = getNotificationsStore();
 
   store.forEach((n) => {
-    if (authUser.role === 'Managing Director' || n.user_role === authUser.role) {
+    if (authUser.role === 'Managing Director' || n.user_role === authUser.role || n.user_id === authUser.id) {
       n.is_read = true;
     }
   });
 
   if (await isSupabaseAvailable()) {
     try {
-      const supabase = await createClient();
-      await supabase.from('enterprise_notifications').update({ is_read: true }).neq('is_read', true);
+      const admin = createAdminClient();
+      let query = admin.from('enterprise_notifications').update({ is_read: true }).neq('is_read', true);
+      if (authUser.role !== 'Managing Director' && authUser.role !== 'Admin / BDM') {
+        const userOrClause = isUuid(authUser.id)
+          ? `user_role.eq.${authUser.role},user_role.is.null,user_id.eq.${authUser.id}`
+          : `user_role.eq.${authUser.role},user_role.is.null`;
+        query = query.or(userOrClause);
+      }
+      await query;
     } catch {
       // Ignore
     }
@@ -244,4 +253,112 @@ export async function createEnterpriseNotification(payload: {
   }
 
   return newNotif;
+}
+
+// -------------------------------------------------------------
+// CENTRAL MULTI-CHANNEL NOTIFICATION ENGINE
+// -------------------------------------------------------------
+
+export interface DispatchNotificationPayload {
+  category: NotificationCategory;
+  title: string;
+  message: string;
+  recipientEmail?: string;
+  recipientPhone?: string;
+  targetRole?: string;
+  userId?: string;
+  entityType?: string;
+  entityId?: string;
+  actionUrl?: string;
+  priority?: NotificationPriority;
+  sendEmail?: boolean;
+  generateWhatsAppLink?: boolean;
+}
+
+export interface DispatchNotificationResult {
+  success: boolean;
+  notificationId?: string;
+  emailSent?: boolean;
+  whatsappLink?: string;
+  error?: string;
+}
+
+/**
+ * Dispatches an enterprise notification across in-app notification center,
+ * optional email (via Zoho/Gmail failover), and optional wa.me instant link.
+ */
+export async function dispatchNotification(
+  payload: DispatchNotificationPayload
+): Promise<DispatchNotificationResult> {
+  try {
+    // 1. Create in-app notification
+    const notif = await createEnterpriseNotification({
+      category: payload.category,
+      title: payload.title,
+      message: payload.message,
+      user_role: payload.targetRole,
+      user_id: payload.userId,
+      entity_type: payload.entityType,
+      entity_id: payload.entityId,
+      action_url: payload.actionUrl,
+      priority: payload.priority || 'MEDIUM',
+    });
+
+    // 2. Format WhatsApp link if recipientPhone is provided
+    let whatsappLink: string | undefined = undefined;
+    if (payload.recipientPhone) {
+      let cleanPhone = payload.recipientPhone.replace(/\D/g, '');
+      if (cleanPhone.length === 10) {
+        cleanPhone = '91' + cleanPhone; // Default to India country code 91
+      }
+      const waText = `*ICON TECH PRO ERP Alert*\n\n*${payload.title}*\n${payload.message}\n\nReference: ${payload.entityId || 'ERP-ALERT'}`;
+      whatsappLink = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waText)}`;
+    }
+
+    // 3. Dispatch Email if requested and recipient email is present
+    let emailSent = false;
+    if (payload.sendEmail && payload.recipientEmail) {
+      try {
+        const sendRes = await EmailService.sendEmail({
+          to: payload.recipientEmail,
+          subject: `[ICON TECH PRO ERP] ${payload.title}`,
+          text: `${payload.title}\n\n${payload.message}\n\nView details: ${payload.actionUrl || 'https://erp.icontechpro.in/dashboard'}`,
+          html: `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+              <div style="border-bottom: 2px solid #0284c7; padding-bottom: 12px; margin-bottom: 16px;">
+                <h2 style="color: #0f172a; margin: 0; font-size: 18px;">${payload.title}</h2>
+                <span style="display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 4px; background-color: #f1f5f9; color: #475569; font-size: 11px; font-weight: 600;">${payload.category}</span>
+              </div>
+              <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">
+                ${payload.message}
+              </p>
+              ${payload.actionUrl ? `
+                <a href="${payload.actionUrl.startsWith('http') ? payload.actionUrl : `https://erp.icontechpro.in${payload.actionUrl}`}" style="display: inline-block; padding: 10px 20px; background-color: #0284c7; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 13px; font-weight: 600;">
+                  Open ERP Action
+                </a>
+              ` : ''}
+              <div style="margin-top: 24px; padding-top: 12px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8;">
+                This is an automated notification from ICON TECH PRO Enterprise ERP.
+              </div>
+            </div>
+          `,
+        });
+        emailSent = sendRes.success;
+      } catch (emailErr) {
+        console.warn('Dispatch notification email warning:', emailErr);
+      }
+    }
+
+    return {
+      success: true,
+      notificationId: notif?.id,
+      emailSent,
+      whatsappLink,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Failed to dispatch notification',
+    };
+  }
 }

@@ -79,12 +79,12 @@ export function SettingsNav() {
       icon: HardDrive,
     },
     {
-      name: 'Security / Danger Zone',
+      name: 'Security Controls',
       href: '/dashboard/settings/security',
       icon: Lock,
     },
     {
-      name: 'Audit Trail',
+      name: 'Audit & Activity Centre',
       href: '/dashboard/audit',
       icon: ShieldAlert,
     },

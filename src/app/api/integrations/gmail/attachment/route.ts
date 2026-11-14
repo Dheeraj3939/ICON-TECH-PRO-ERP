@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
-import { getFreshAccessToken } from '@/lib/actions/gmail';
+import { getFreshAccessToken } from '@/lib/integrations/gmail-token';
 import { GmailClient } from '@/lib/integrations/gmail-client';
 
 /**

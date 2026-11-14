@@ -1,6 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { isUuid } from '@/lib/supabase/db-helpers';
+import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { requireRole } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit/logger';
 import { getInvoices, getPayments } from '@/lib/actions/billing';
@@ -103,73 +106,95 @@ export async function runTallyReconciliation(): Promise<{
     const supRes = await getSupplierInvoices();
     const supInvoices = supRes.invoices || [];
 
-    // Check each ERP invoice against recon store
+    const isOnline = await isSupabaseAvailable();
+    const admin = isOnline ? createAdminClient() : null;
+    let workingItems: TallyReconciliationItem[] = store;
+
+    if (admin) {
+      const { data: dbRecon } = await admin.from('tally_reconciliations').select('*');
+      if (dbRecon) {
+        workingItems = dbRecon as TallyReconciliationItem[];
+      }
+    }
+
+    const toInsert: any[] = [];
+    const checkAndQueue = (candidate: Omit<TallyReconciliationItem, 'id'>) => {
+      const existing = workingItems.find(
+        (r) => r.erp_id === candidate.erp_id || r.erp_number === candidate.erp_number
+      );
+      if (!existing) {
+        if (admin) {
+          toInsert.push(candidate);
+        } else {
+          store.push({
+            id: `RECON-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            ...candidate,
+          });
+        }
+      }
+    };
+
     for (const inv of invoices) {
-      const existing = store.find((r) => r.erp_id === inv.id || r.erp_number === inv.invoice_number);
-      if (!existing) {
-        // Create an ERP_ONLY item pending sync
-        store.push({
-          id: `RECON-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          entity_type: 'INVOICE',
-          erp_id: inv.id,
-          erp_number: inv.invoice_number,
-          erp_amount: inv.grand_total,
-          erp_date: inv.invoice_date,
-          recon_status: 'ERP_ONLY',
-          difference_amount: inv.grand_total,
-          notes: 'Invoice in ERP has not yet been exported/imported to TallyPrime',
-          is_reviewed: false,
-          last_checked_at: new Date().toISOString(),
-        });
-      }
+      checkAndQueue({
+        entity_type: 'INVOICE',
+        erp_id: inv.id,
+        erp_number: inv.invoice_number,
+        erp_amount: inv.grand_total,
+        erp_date: inv.invoice_date,
+        recon_status: 'ERP_ONLY',
+        difference_amount: inv.grand_total,
+        notes: 'Invoice in ERP has not yet been exported/imported to TallyPrime',
+        is_reviewed: false,
+        last_checked_at: new Date().toISOString(),
+      });
     }
 
-    // Check payments
     for (const pay of payments) {
-      const existing = store.find((r) => r.erp_id === pay.id || r.erp_number === pay.payment_number);
-      if (!existing) {
-        store.push({
-          id: `RECON-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          entity_type: 'PAYMENT',
-          erp_id: pay.id,
-          erp_number: pay.payment_number,
-          erp_amount: pay.amount,
-          erp_date: pay.payment_date,
-          recon_status: 'ERP_ONLY',
-          difference_amount: pay.amount,
-          notes: 'Payment receipt pending posting in Tally bank ledger',
-          is_reviewed: false,
-          last_checked_at: new Date().toISOString(),
-        });
-      }
+      checkAndQueue({
+        entity_type: 'PAYMENT',
+        erp_id: pay.id,
+        erp_number: pay.payment_number,
+        erp_amount: pay.amount,
+        erp_date: pay.payment_date,
+        recon_status: 'ERP_ONLY',
+        difference_amount: pay.amount,
+        notes: 'Payment receipt pending posting in Tally bank ledger',
+        is_reviewed: false,
+        last_checked_at: new Date().toISOString(),
+      });
     }
 
-    // Check supplier invoices
     for (const sinv of supInvoices) {
-      const existing = store.find((r) => r.erp_id === sinv.id || r.erp_number === sinv.invoice_number);
-      if (!existing) {
-        store.push({
-          id: `RECON-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          entity_type: 'PURCHASE_INVOICE',
-          erp_id: sinv.id,
-          erp_number: sinv.invoice_number,
-          erp_amount: sinv.total_amount,
-          erp_date: sinv.invoice_date,
-          recon_status: sinv.tally_sync_status === 'SYNCED' ? 'MATCHED' : 'ERP_ONLY',
-          difference_amount: sinv.tally_sync_status === 'SYNCED' ? 0 : sinv.total_amount,
-          notes: `Supplier Purchase Invoice from ${sinv.supplier_name}`,
-          is_reviewed: false,
-          last_checked_at: new Date().toISOString(),
-        });
+      checkAndQueue({
+        entity_type: 'PURCHASE_INVOICE',
+        erp_id: sinv.id,
+        erp_number: sinv.invoice_number,
+        erp_amount: sinv.total_amount,
+        erp_date: sinv.invoice_date,
+        recon_status: sinv.tally_sync_status === 'SYNCED' ? 'MATCHED' : 'ERP_ONLY',
+        difference_amount: sinv.tally_sync_status === 'SYNCED' ? 0 : sinv.total_amount,
+        notes: `Supplier Purchase Invoice from ${sinv.supplier_name}`,
+        is_reviewed: false,
+        last_checked_at: new Date().toISOString(),
+      });
+    }
+
+    if (admin && toInsert.length > 0) {
+      const { data: inserted } = await admin
+        .from('tally_reconciliations')
+        .insert(toInsert)
+        .select('*');
+      if (inserted) {
+        workingItems = [...workingItems, ...(inserted as TallyReconciliationItem[])];
       }
     }
 
     const summary = {
-      total: store.length,
-      matched: store.filter((i) => i.recon_status === 'MATCHED').length,
-      value_mismatch: store.filter((i) => i.recon_status === 'VALUE_MISMATCH').length,
-      erp_only: store.filter((i) => i.recon_status === 'ERP_ONLY').length,
-      tally_only: store.filter((i) => i.recon_status === 'TALLY_ONLY').length,
+      total: workingItems.length,
+      matched: workingItems.filter((i) => i.recon_status === 'MATCHED').length,
+      value_mismatch: workingItems.filter((i) => i.recon_status === 'VALUE_MISMATCH').length,
+      erp_only: workingItems.filter((i) => i.recon_status === 'ERP_ONLY').length,
+      tally_only: workingItems.filter((i) => i.recon_status === 'TALLY_ONLY').length,
     };
 
     await logAuditEvent({
@@ -180,7 +205,7 @@ export async function runTallyReconciliation(): Promise<{
     });
 
     revalidatePath('/dashboard/tally');
-    return { success: true, data: { items: store, summary } };
+    return { success: true, data: { items: workingItems, summary } };
   } catch (err) {
     return { success: false, error: (err as Error).message || 'Failed to run Tally reconciliation' };
   }
@@ -194,6 +219,17 @@ export async function getTallyReconciliationItems(filters?: {
   entity_type?: string;
 }): Promise<{ success: boolean; data?: TallyReconciliationItem[]; error?: string }> {
   try {
+    if (await isSupabaseAvailable()) {
+      const admin = createAdminClient();
+      let query = admin.from('tally_reconciliations').select('*').order('last_checked_at', { ascending: false });
+      if (filters?.status) query = query.eq('recon_status', filters.status);
+      if (filters?.entity_type) query = query.eq('entity_type', filters.entity_type);
+      const { data, error } = await query;
+      if (!error && data) {
+        return { success: true, data: data as TallyReconciliationItem[] };
+      }
+    }
+
     const store = getReconStore();
     let filtered = [...store];
 
@@ -219,6 +255,30 @@ export async function markTallyItemReviewed(
 ): Promise<{ success: boolean; data?: TallyReconciliationItem; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
+    const nowIso = new Date().toISOString();
+
+    if (await isSupabaseAvailable() && isUuid(id)) {
+      const admin = createAdminClient();
+      const { data: existing } = await admin.from('tally_reconciliations').select('*').eq('id', id).maybeSingle();
+      if (existing) {
+        const nextNotes = notes ? (existing.notes ? `${existing.notes} | ${notes}` : notes) : existing.notes;
+        const { data: updated } = await admin
+          .from('tally_reconciliations')
+          .update({ is_reviewed: true, reviewed_by: authUser.name, reviewed_at: nowIso, notes: nextNotes })
+          .eq('id', id)
+          .select('*')
+          .single();
+        await logAuditEvent({
+          userName: authUser.name,
+          action: 'REVIEW_TALLY_RECON_ITEM',
+          module: 'FINANCE',
+          details: `Reviewed Tally reconciliation item ${existing.erp_number} (${existing.recon_status})`,
+        });
+        revalidatePath('/dashboard/tally');
+        return { success: true, data: (updated || existing) as TallyReconciliationItem };
+      }
+    }
+
     const store = getReconStore();
     const item = store.find((i) => i.id === id);
 
@@ -228,7 +288,7 @@ export async function markTallyItemReviewed(
 
     item.is_reviewed = true;
     item.reviewed_by = authUser.name;
-    item.reviewed_at = new Date().toISOString();
+    item.reviewed_at = nowIso;
     if (notes) {
       item.notes = (item.notes ? item.notes + ' | ' : '') + notes;
     }
@@ -257,6 +317,36 @@ export async function resolveTallyDiscrepancy(
 ): Promise<{ success: boolean; data?: TallyReconciliationItem; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
+    const nowIso = new Date().toISOString();
+
+    if (await isSupabaseAvailable() && isUuid(id)) {
+      const admin = createAdminClient();
+      const { data: existing } = await admin.from('tally_reconciliations').select('*').eq('id', id).maybeSingle();
+      if (existing) {
+        const nextNotes = `${existing.notes ? `${existing.notes} | ` : ''}Resolved (${resolutionAction}): ${notes}`;
+        const { data: updated } = await admin
+          .from('tally_reconciliations')
+          .update({
+            ...(resolutionAction === 'FORCE_MATCH' ? { recon_status: 'MATCHED', difference_amount: 0 } : {}),
+            is_reviewed: true,
+            reviewed_by: authUser.name,
+            reviewed_at: nowIso,
+            notes: nextNotes,
+          })
+          .eq('id', id)
+          .select('*')
+          .single();
+        await logAuditEvent({
+          userName: authUser.name,
+          action: 'RESOLVE_TALLY_DISCREPANCY',
+          module: 'FINANCE',
+          details: `Resolved Tally discrepancy for ${existing.erp_number} via ${resolutionAction} (${notes})`,
+        });
+        revalidatePath('/dashboard/tally');
+        return { success: true, data: (updated || existing) as TallyReconciliationItem };
+      }
+    }
+
     const store = getReconStore();
     const item = store.find((i) => i.id === id);
 

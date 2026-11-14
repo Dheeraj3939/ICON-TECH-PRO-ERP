@@ -23,12 +23,17 @@ import {
 } from 'lucide-react';
 import { getOrders, updateOrderStatus } from '@/lib/actions/orders';
 import { createInvoiceFromOrder } from '@/lib/actions/billing';
+import { createProformaFromSalesOrder } from '@/lib/actions/proforma';
 import { createDeliveryChallan } from '@/lib/actions/operations';
 import { exportToCSV } from '@/lib/utils/export';
+import { getCurrentSessionUser } from '@/lib/actions/users';
+import { canExportCSV } from '@/lib/permissions/registry';
+import type { AuthenticatedUser } from '@/lib/auth/session';
 import type { SalesOrder } from '@/types/erp';
 import EditSalesOrderModal from '@/components/modals/EditSalesOrderModal';
 
 export default function SalesOrdersPage() {
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [orders, setOrders] = useState<SalesOrder[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -36,6 +41,10 @@ export default function SalesOrdersPage() {
   const [editingOrder, setEditingOrder] = useState<SalesOrder | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    getCurrentSessionUser().then(setCurrentUser);
+  }, []);
 
   const loadData = async () => {
     const res = await getOrders({ status: statusFilter, search });
@@ -65,6 +74,27 @@ export default function SalesOrdersPage() {
         setActionMessage({
           type: 'error',
           text: res.error || 'Failed to create invoice',
+        });
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleCreateProforma = async (orderId: string) => {
+    try {
+      setLoadingAction(`pi-${orderId}`);
+      setActionMessage(null);
+      const res = await createProformaFromSalesOrder(orderId);
+      if (res.success && res.data) {
+        setActionMessage({
+          type: 'success',
+          text: `Proforma Invoice ${res.data.proforma_number} created! View under Sales -> Proforma Invoices.`,
+        });
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: res.error || 'Failed to create proforma invoice',
         });
       }
     } finally {
@@ -104,20 +134,25 @@ export default function SalesOrdersPage() {
   };
 
   const handleExportCSV = () => {
-    exportToCSV('ICON_Sales_Orders', orders, [
-      { key: 'order_number', label: 'Order #' },
-      { key: 'quotation_id', label: 'Quotation Ref' },
-      { key: 'customer_name', label: 'Customer Name' },
-      { key: 'company_name', label: 'Company Name' },
-      { key: 'order_date', label: 'Order Date' },
-      { key: 'total_amount', label: 'Total Value (₹)' },
-      { key: 'place_of_supply', label: 'Place of Supply' },
-      { key: 'material_status', label: 'Material Status' },
-      { key: 'dispatch_status', label: 'Dispatch Status' },
-      { key: 'status', label: 'Order Status' },
-      { key: 'invoice_id', label: 'Invoice Ref' },
-      { key: 'courier_tracking', label: 'Tracking' },
-    ]);
+    exportToCSV(
+      'ICON_Sales_Orders',
+      orders,
+      [
+        { key: 'order_number', label: 'Order #' },
+        { key: 'quotation_id', label: 'Quotation Ref' },
+        { key: 'customer_name', label: 'Customer Name' },
+        { key: 'company_name', label: 'Company Name' },
+        { key: 'order_date', label: 'Order Date' },
+        { key: 'total_amount', label: 'Total Value (₹)' },
+        { key: 'place_of_supply', label: 'Place of Supply' },
+        { key: 'material_status', label: 'Material Status' },
+        { key: 'dispatch_status', label: 'Dispatch Status' },
+        { key: 'status', label: 'Order Status' },
+        { key: 'invoice_id', label: 'Invoice Ref' },
+        { key: 'courier_tracking', label: 'Tracking' },
+      ],
+      currentUser?.role
+    );
   };
 
   return (
@@ -147,14 +182,16 @@ export default function SalesOrdersPage() {
             <span>Procurement Hub</span>
           </Link>
 
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
-          >
-            <Download className="w-4 h-4 text-slate-500" />
-            <span>Export CSV</span>
-          </button>
+          {canExportCSV(currentUser?.role) && (
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 bg-white text-slate-700 text-xs font-bold shadow-xs transition"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -313,6 +350,16 @@ export default function SalesOrdersPage() {
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
                           )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleCreateProforma(o.id)}
+                            disabled={loadingAction === `pi-${o.id}`}
+                            className="px-2 py-1 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold transition text-[10.5px] border border-indigo-200 disabled:opacity-50"
+                            title="Generate Proforma Invoice"
+                          >
+                            <span>{loadingAction === `pi-${o.id}` ? '...' : 'PI'}</span>
+                          </button>
 
                           {!o.invoice_id ? (
                             <button
@@ -504,6 +551,14 @@ export default function SalesOrdersPage() {
                         <span>Edit</span>
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => handleCreateProforma(o.id)}
+                      disabled={loadingAction === `pi-${o.id}`}
+                      className="flex-1 min-h-[44px] flex items-center justify-center gap-1 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold disabled:opacity-50"
+                    >
+                      <span>{loadingAction === `pi-${o.id}` ? '...' : 'Proforma'}</span>
+                    </button>
                     {!o.invoice_id ? (
                       <button
                         type="button"

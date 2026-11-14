@@ -1,8 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { findByIdOrCode, isUuid, sanitizeUuid } from '@/lib/supabase/db-helpers';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { INITIAL_SUPPLIERS } from '@/lib/constants/erp-data';
 import { incrementProductStock } from '@/lib/actions/products';
@@ -159,6 +159,25 @@ function getProductSuppliersStore(): ProductSupplier[] {
  * Retrieve distributor master pricing and lead times for products.
  */
 export async function getProductSuppliers(productId?: string): Promise<ProductSupplier[]> {
+  await requireRole(['Managing Director', 'Admin / BDM', 'Accounts', 'BDM']);
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      let query = admin.from('product_suppliers').select('*');
+      if (productId) {
+        query = isUuid(productId)
+          ? query.or(`product_id.eq.${productId},product_sku.eq.${productId}`)
+          : query.eq('product_sku', productId);
+      }
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (!error && data) {
+        return data as ProductSupplier[];
+      }
+    } catch (err) {
+      console.warn('Supabase getProductSuppliers fallback:', err);
+    }
+  }
+
   const store = getProductSuppliersStore();
   if (productId) {
     return store.filter((ps) => ps.product_id === productId || ps.product_sku === productId);
@@ -197,16 +216,22 @@ export async function setProductSupplier(
       try {
         const admin = createAdminClient();
         await admin.from('product_suppliers').upsert({
-          product_id: record.product_id,
+          product_id: sanitizeUuid(record.product_id),
           product_sku: record.product_sku,
-          supplier_id: record.supplier_id,
+          product_name: record.product_name,
+          supplier_id: sanitizeUuid(record.supplier_id),
           supplier_name: record.supplier_name,
+          distributor_part_number: record.distributor_part_number || null,
           purchase_cost: record.purchase_cost,
           lead_time_days: record.lead_time_days,
           payment_terms_days: record.payment_terms_days,
           is_preferred: record.is_preferred,
           is_backup: record.is_backup,
+          price_valid_until: record.price_valid_until || null,
+          minimum_order_qty: record.minimum_order_qty,
           availability_status: record.availability_status,
+          last_quote_reference: record.last_quote_reference || null,
+          last_quote_date: record.last_quote_date || null,
           updated_at: record.updated_at,
         });
       } catch (err) {
@@ -235,6 +260,7 @@ function getInternalPurchaseOrdersStore(): PurchaseOrder[] {
 }
 
 export async function getPurchaseOrdersStore(): Promise<PurchaseOrder[]> {
+  await requireRole(['Managing Director', 'Admin / BDM', 'Accounts', 'BDM']);
   return getInternalPurchaseOrdersStore();
 }
 
@@ -246,14 +272,15 @@ function getSuppliersStore(): Supplier[] {
 }
 
 export async function getSuppliers(): Promise<Supplier[]> {
+  await requireRole(['Managing Director', 'Admin / BDM', 'Accounts', 'BDM']);
   const store = getSuppliersStore();
 
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      const { data, error } = await supabase.from('suppliers').select('*').order('supplier_name', { ascending: true });
-      if (!error && data && data.length > 0) {
+      const admin = createAdminClient();
+      const { data, error } = await admin.from('suppliers').select('*').order('supplier_name', { ascending: true });
+      if (!error && data) {
         return data as Supplier[];
       }
     } catch (err) {
@@ -265,17 +292,18 @@ export async function getSuppliers(): Promise<Supplier[]> {
 }
 
 export async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
+  await requireRole(['Managing Director', 'Admin / BDM', 'Accounts', 'BDM']);
   const store = getInternalPurchaseOrdersStore();
 
   const isOnline = await isSupabaseAvailable();
   if (isOnline) {
     try {
-      const supabase = await createClient();
-      const { data, error } = await supabase
+      const admin = createAdminClient();
+      const { data, error } = await admin
         .from('purchase_orders')
         .select('*, items:purchase_order_items(*)')
         .order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data as PurchaseOrder[];
       }
     } catch (err) {
@@ -284,6 +312,28 @@ export async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
   }
 
   return store;
+}
+
+async function findPurchaseOrderRecord(poId: string): Promise<PurchaseOrder | null> {
+  if (await isSupabaseAvailable()) {
+    try {
+      const admin = createAdminClient();
+      const row = await findByIdOrCode<PurchaseOrder>(
+        admin,
+        'purchase_orders',
+        poId,
+        'po_number',
+        '*, items:purchase_order_items(*)'
+      );
+      if (row) return row;
+      return null;
+    } catch (err) {
+      console.warn('Supabase findPurchaseOrderRecord fallback:', err);
+    }
+  }
+
+  const store = getInternalPurchaseOrdersStore();
+  return store.find((po) => po.id === poId || po.po_number === poId) || null;
 }
 
 /**
@@ -303,6 +353,7 @@ export async function getUnfulfilledOrderItems(): Promise<Array<{
   procurement_required_qty: number;
   procurement_status: string;
 }>> {
+  await requireRole(['Managing Director', 'Admin / BDM', 'Accounts', 'BDM']);
   const { orders } = await getOrders();
   const unfulfilled: Array<any> = [];
 
@@ -456,12 +507,16 @@ export async function createPurchaseOrder(payload: {
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
+        const resolvedSupplierId = sanitizeUuid(newPO.supplier_id);
+        const resolvedSalesOrderId = sanitizeUuid(newPO.sales_order_id);
+        const resolvedConsigneeId = sanitizeUuid(newPO.consignee_customer_id);
+
         const { data: dbPO, error: poErr } = await admin
           .from('purchase_orders')
           .insert({
             po_number: newPO.po_number,
             entity_code: newPO.entity_code,
-            supplier_id: newPO.supplier_id || null,
+            supplier_id: resolvedSupplierId,
             supplier_name: newPO.supplier_name,
             supplier_contact: newPO.supplier_contact || null,
             order_date: newPO.order_date,
@@ -471,10 +526,10 @@ export async function createPurchaseOrder(payload: {
             total_amount: newPO.total_amount,
             status: newPO.status,
             created_by_name: newPO.created_by_name,
-            sales_order_id: newPO.sales_order_id || null,
+            sales_order_id: resolvedSalesOrderId,
             sales_order_number: newPO.sales_order_number || null,
             delivery_type: newPO.delivery_type,
-            consignee_customer_id: newPO.consignee_customer_id || null,
+            consignee_customer_id: resolvedConsigneeId,
             consignee_name: newPO.consignee_name || null,
             consignee_address: newPO.consignee_address || null,
             consignee_contact: newPO.consignee_contact || null,
@@ -488,20 +543,64 @@ export async function createPurchaseOrder(payload: {
 
           const itemRows = items.map((it) => ({
             po_id: dbPO.id,
-            product_id: it.product_id || null,
+            product_id: sanitizeUuid(it.product_id),
             product_name: it.product_name,
             quantity: it.quantity,
             unit_cost: it.unit_cost,
             gst_rate: it.gst_rate,
             total_cost: it.total_cost,
             received_quantity: 0,
-            sales_order_id: it.sales_order_id || null,
-            sales_order_item_id: it.sales_order_item_id || null,
+            sales_order_id: sanitizeUuid(it.sales_order_id),
+            sales_order_item_id: sanitizeUuid(it.sales_order_item_id),
             customer_name: it.customer_name || null,
             order_number: it.order_number || null,
           }));
 
-          await admin.from('purchase_order_items').insert(itemRows);
+          const { data: insertedItems } = await admin
+            .from('purchase_order_items')
+            .insert(itemRows)
+            .select('*');
+          if (Array.isArray(insertedItems)) {
+            newPO.items = insertedItems as PurchaseOrderItem[];
+          }
+
+          // Persist linked Sales Order & Sales Order Item procurement tracking in Supabase
+          for (const poLine of items) {
+            const targetSoItemId = sanitizeUuid(poLine.sales_order_item_id);
+            const targetSoId = sanitizeUuid(poLine.sales_order_id);
+            if (targetSoItemId) {
+              const { data: currentSoItem } = await admin
+                .from('sales_order_items')
+                .select('id, incoming_quantity')
+                .eq('id', targetSoItemId)
+                .maybeSingle();
+              if (currentSoItem) {
+                await admin
+                  .from('sales_order_items')
+                  .update({
+                    procurement_status: 'PO_ISSUED',
+                    incoming_quantity: (currentSoItem.incoming_quantity || 0) + poLine.quantity,
+                    purchase_order_id: dbPO.id,
+                    po_number: newPO.po_number,
+                    supplier_name: newPO.supplier_name,
+                  })
+                  .eq('id', currentSoItem.id);
+              }
+            }
+            if (targetSoId || poLine.order_number) {
+              let soQuery = admin.from('sales_orders').select('id, material_status');
+              soQuery = targetSoId
+                ? soQuery.eq('id', targetSoId)
+                : soQuery.eq('order_number', poLine.order_number!);
+              const { data: soRow } = await soQuery.maybeSingle();
+              if (soRow && soRow.material_status === 'PO Required') {
+                await admin
+                  .from('sales_orders')
+                  .update({ material_status: 'Partially Received' })
+                  .eq('id', soRow.id);
+              }
+            }
+          }
         }
       } catch (dbErr) {
         console.warn('Supabase createPurchaseOrder insert failed, fallback:', dbErr);
@@ -548,8 +647,7 @@ export async function receivePurchaseOrder(
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
 
-    const store = getInternalPurchaseOrdersStore();
-    const foundPO = store.find((po) => po.id === poId || po.po_number === poId);
+    const foundPO = await findPurchaseOrderRecord(poId);
 
     if (!foundPO) {
       return { success: false, error: 'Purchase order not found' };
@@ -557,9 +655,11 @@ export async function receivePurchaseOrder(
 
     const isDropShip = Boolean(foundPO.delivery_type === 'DIRECT_CUSTOMER_DROPSHIP' || payload.isDropShip);
     const ordersStore = await getOrdersStore();
+    const isOnline = await isSupabaseAvailable();
+    const admin = isOnline ? createAdminClient() : null;
 
     for (const item of payload.receivedItems) {
-      const poLine = foundPO.items.find(
+      const poLine = (foundPO.items || []).find(
         (i) => i.product_name.toLowerCase() === item.product_name.toLowerCase()
       );
       if (poLine) {
@@ -572,6 +672,13 @@ export async function receivePurchaseOrder(
         }
 
         poLine.received_quantity = (poLine.received_quantity || 0) + item.received_quantity;
+
+        if (admin && isUuid(poLine.id)) {
+          await admin
+            .from('purchase_order_items')
+            .update({ received_quantity: poLine.received_quantity })
+            .eq('id', poLine.id);
+        }
 
         if (isDropShip) {
           // Direct Drop-Ship: Fulfill linked Sales Order item directly, ZERO office stock inflation
@@ -591,6 +698,43 @@ export async function receivePurchaseOrder(
               order.dispatch_status = 'Dispatched';
               if (payload.tracking_number) {
                 order.courier_tracking = `Drop-Ship Tracking: ${payload.tracking_number}`;
+              }
+            }
+
+            if (admin) {
+              try {
+                let soQuery = admin.from('sales_orders').select('id, items:sales_order_items(*)');
+                soQuery = isUuid(poLine.sales_order_id)
+                  ? soQuery.eq('id', poLine.sales_order_id!)
+                  : soQuery.eq('order_number', poLine.order_number!);
+                const { data: dbSo } = await soQuery.maybeSingle();
+                if (dbSo) {
+                  const dbSoLine = (dbSo.items || []).find(
+                    (it: any) =>
+                      it.id === poLine.sales_order_item_id ||
+                      it.product_name?.toLowerCase() === poLine.product_name.toLowerCase()
+                  );
+                  if (dbSoLine) {
+                    await admin
+                      .from('sales_order_items')
+                      .update({
+                        procurement_status: 'DROPSHIPPED',
+                        fulfilled_quantity: (dbSoLine.fulfilled_quantity || 0) + item.received_quantity,
+                        incoming_quantity: Math.max(0, (dbSoLine.incoming_quantity || 0) - item.received_quantity),
+                      })
+                      .eq('id', dbSoLine.id);
+                  }
+                  await admin
+                    .from('sales_orders')
+                    .update({
+                      dispatch_status: 'Dispatched',
+                      material_status: 'In Stock',
+                      ...(payload.tracking_number ? { courier_tracking: `Drop-Ship Tracking: ${payload.tracking_number}` } : {}),
+                    })
+                    .eq('id', dbSo.id);
+                }
+              } catch (dbErr) {
+                console.warn('Supabase drop-ship SO sync fallback:', dbErr);
               }
             }
           }
@@ -625,6 +769,44 @@ export async function receivePurchaseOrder(
                 soLine.incoming_quantity = Math.max(0, (soLine.incoming_quantity || 0) - item.received_quantity);
               }
             }
+
+            if (admin) {
+              try {
+                let soQuery = admin.from('sales_orders').select('id, items:sales_order_items(*)');
+                soQuery = isUuid(poLine.sales_order_id)
+                  ? soQuery.eq('id', poLine.sales_order_id!)
+                  : soQuery.eq('order_number', poLine.order_number!);
+                const { data: dbSo } = await soQuery.maybeSingle();
+                if (dbSo) {
+                  const dbSoLine = (dbSo.items || []).find(
+                    (it: any) =>
+                      it.id === poLine.sales_order_item_id ||
+                      it.product_name?.toLowerCase() === poLine.product_name.toLowerCase()
+                  );
+                  if (dbSoLine) {
+                    const nextReserved = (dbSoLine.reserved_quantity || 0) + item.received_quantity;
+                    await admin
+                      .from('sales_order_items')
+                      .update({
+                        procurement_status: 'RECEIVED',
+                        reserved_quantity: nextReserved,
+                        fulfilled_quantity: (dbSoLine.fulfilled_quantity || 0) + item.received_quantity,
+                        incoming_quantity: Math.max(0, (dbSoLine.incoming_quantity || 0) - item.received_quantity),
+                      })
+                      .eq('id', dbSoLine.id);
+                  }
+                  const allReady = (dbSo.items || []).every(
+                    (it: any) => it.id === dbSoLine?.id || ['IN_OFFICE_STOCK', 'RECEIVED', 'DROPSHIPPED', 'FULFILLED'].includes(it.procurement_status)
+                  );
+                  await admin
+                    .from('sales_orders')
+                    .update({ material_status: allReady ? 'In Stock' : 'Partially Received' })
+                    .eq('id', dbSo.id);
+                }
+              } catch (dbErr) {
+                console.warn('Supabase office-receipt SO sync fallback:', dbErr);
+              }
+            }
           }
         }
       }
@@ -639,13 +821,52 @@ export async function receivePurchaseOrder(
     if (payload.delivery_date) foundPO.delivery_date = payload.delivery_date;
 
     // Update PO status
-    const totalOrdered = foundPO.items.reduce((s, i) => s + i.quantity, 0);
-    const totalReceived = foundPO.items.reduce((s, i) => s + (i.received_quantity || 0), 0);
+    const totalOrdered = (foundPO.items || []).reduce((s, i) => s + i.quantity, 0);
+    const totalReceived = (foundPO.items || []).reduce((s, i) => s + (i.received_quantity || 0), 0);
 
     if (totalReceived >= totalOrdered) {
       foundPO.status = 'Received';
     } else if (totalReceived > 0) {
       foundPO.status = 'Partially Received';
+    }
+
+    const cachedPO = getInternalPurchaseOrdersStore().find((p) => p.id === foundPO.id || p.po_number === foundPO.po_number);
+    if (cachedPO && cachedPO !== foundPO) {
+      cachedPO.status = foundPO.status;
+      cachedPO.items = foundPO.items;
+    }
+
+    if (admin) {
+      try {
+        await admin
+          .from('purchase_orders')
+          .update({
+            status: foundPO.status,
+            distributor_invoice_number: foundPO.distributor_invoice_number || null,
+            distributor_invoice_date: foundPO.distributor_invoice_date || null,
+            courier_transporter: foundPO.courier_transporter || null,
+            tracking_number: foundPO.tracking_number || null,
+            proof_of_delivery_ref: foundPO.proof_of_delivery_ref || null,
+            delivery_date: foundPO.delivery_date || null,
+          })
+          .eq('id', foundPO.id);
+
+        if (!isDropShip) {
+          const grnNumber = await getNextGRNNumber();
+          await admin.from('goods_receipt_notes').insert({
+            grn_number: grnNumber,
+            po_id: sanitizeUuid(foundPO.id),
+            po_number: foundPO.po_number,
+            supplier_name: foundPO.supplier_name,
+            vendor_challan_no: payload.distributor_invoice_number || null,
+            received_date: payload.delivery_date || new Date().toISOString().split('T')[0],
+            received_by_name: authUser.name,
+            notes: `Received ${totalReceived}/${totalOrdered} units (${foundPO.status})`,
+          });
+        }
+      } catch (dbErr) {
+        console.warn('Supabase receivePurchaseOrder update/GRN fallback:', dbErr);
+      }
     }
 
     await logAuditEvent({
@@ -972,7 +1193,21 @@ export async function getSupplierPerformance(supplierId?: string): Promise<{
   try {
     const allSuppliers = await getSuppliers();
     const pos = await getPurchaseOrders();
-    const evaluations = getSupplierEvaluationsStore();
+    let evaluations = getSupplierEvaluationsStore();
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const { data, error } = await admin
+          .from('supplier_evaluations')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (!error && data) {
+          evaluations = data as SupplierEvaluation[];
+        }
+      } catch {
+        // Fallback
+      }
+    }
 
     const targetSuppliers = supplierId
       ? allSuppliers.filter((s) => s.id === supplierId || s.supplier_name.toLowerCase() === supplierId.toLowerCase())
@@ -1096,7 +1331,7 @@ export async function recordSupplierEvaluation(
       try {
         const admin = createAdminClient();
         await admin.from('supplier_evaluations').insert({
-          supplier_id: record.supplier_id,
+          supplier_id: sanitizeUuid(record.supplier_id),
           supplier_name: record.supplier_name,
           evaluation_period: record.evaluation_period,
           on_time_delivery_score: record.on_time_delivery_score,
@@ -1139,9 +1374,7 @@ export async function updatePurchaseOrderStatus(
 ): Promise<{ success: boolean; data?: PurchaseOrder; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Accounts', 'BDM']);
-    const store = getInternalPurchaseOrdersStore();
-
-    const po = store.find((p) => p.id === poId || p.po_number === poId);
+    const po = await findPurchaseOrderRecord(poId);
     if (!po) {
       return { success: false, error: `Purchase order ${poId} not found` };
     }
@@ -1224,8 +1457,7 @@ export async function updatePurchaseOrder(
 ): Promise<{ success: boolean; data?: PurchaseOrder; error?: string }> {
   try {
     const authUser = await requireRole(['Managing Director', 'Admin / BDM', 'Accounts']);
-    const store = getInternalPurchaseOrdersStore();
-    const po = store.find((p) => p.id === poId || p.po_number === poId);
+    const po = await findPurchaseOrderRecord(poId);
 
     if (!po) {
       return { success: false, error: 'Purchase Order not found' };
@@ -1246,6 +1478,17 @@ export async function updatePurchaseOrder(
     if (values.consignee_contact !== undefined) po.consignee_contact = values.consignee_contact;
     if (values.consignee_phone !== undefined) po.consignee_phone = values.consignee_phone;
 
+    const cachedPo = getInternalPurchaseOrdersStore().find((p) => p.id === po.id || p.po_number === po.po_number);
+    if (cachedPo && cachedPo !== po) {
+      cachedPo.expected_delivery = po.expected_delivery;
+      cachedPo.supplier_contact = po.supplier_contact;
+      cachedPo.delivery_type = po.delivery_type;
+      cachedPo.consignee_name = po.consignee_name;
+      cachedPo.consignee_address = po.consignee_address;
+      cachedPo.consignee_contact = po.consignee_contact;
+      cachedPo.consignee_phone = po.consignee_phone;
+    }
+
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
@@ -1260,7 +1503,7 @@ export async function updatePurchaseOrder(
             consignee_contact: po.consignee_contact || null,
             consignee_phone: po.consignee_phone || null,
           })
-          .or(`id.eq.${po.id},po_number.eq.${po.po_number}`);
+          .eq('id', po.id);
       } catch (err) {
         console.warn('Supabase updatePurchaseOrder fallback:', err);
       }
@@ -1281,6 +1524,5 @@ export async function updatePurchaseOrder(
     return { success: false, error: (err as Error).message || 'Failed to update Purchase Order' };
   }
 }
-
 
 

@@ -3,6 +3,34 @@ import type { UserProfile } from './database';
 export type CustomerType = 'COMPANY' | 'INDIVIDUAL' | 'GOVERNMENT';
 export type CustomerStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
 
+export interface CustomerContact {
+  id?: string;
+  name: string;
+  designation?: string;
+  phone: string;
+  email?: string;
+  is_primary?: boolean;
+}
+
+export interface CustomerShippingAddress {
+  id?: string;
+  label?: string; // e.g., 'Site 1', 'Central Warehouse', 'Branch'
+  address_line1: string;
+  address_line2?: string;
+  area?: string;
+  city: string;
+  state: string;
+  pincode: string;
+  country?: string;
+  is_default?: boolean;
+}
+
+export interface CustomerInternalNotes {
+  general_notes?: string;
+  requirement_summary?: string;
+  internal_commercial_info?: string;
+}
+
 export interface Customer {
   id: string;
   customer_code: string; // ICONYYXXXX (e.g. ICON260001) - Read-only, database generated
@@ -45,6 +73,9 @@ export interface Customer {
   salesperson_id: string | null;
   status: CustomerStatus;
   notes: string | null;
+  contacts?: CustomerContact[];
+  shipping_addresses?: CustomerShippingAddress[];
+  internal_notes?: CustomerInternalNotes;
   
   // Audit
   created_by: string | null;
@@ -86,6 +117,9 @@ export interface CustomerFormData {
   salesperson_id?: string;
   status: CustomerStatus;
   notes?: string;
+  contacts?: CustomerContact[];
+  shipping_addresses?: CustomerShippingAddress[];
+  internal_notes?: CustomerInternalNotes;
 }
 
 export interface CustomerFilters {

@@ -60,7 +60,12 @@ export function parseCSV(csvText: string): {
     const values = lines[i];
     const record: Record<string, string> = {};
     rawHeaders.forEach((header, index) => {
-      record[header] = values[index] !== undefined ? values[index] : '';
+      let val = values[index] !== undefined ? values[index] : '';
+      // Strip dangerous leading formula injection prefixes (=, +, -, @, \t, \r)
+      if (/^[=+\-@\t\r]/.test(val)) {
+        val = val.replace(/^[=+\-@\t\r]+/, '');
+      }
+      record[header] = val;
     });
     rows.push(record);
   }
@@ -200,4 +205,81 @@ export const IMPORT_TEMPLATES: Record<string, ImportTemplateConfig> = {
       },
     ],
   },
+  opening_receivables: {
+    id: 'opening_receivables',
+    name: 'Opening Receivables (Customer Outstanding)',
+    description: 'Tally export of customer opening balances, unpaid invoices, and overdue amounts',
+    filename: 'icon_opening_receivables_template.csv',
+    headers: [
+      { key: 'customer_name', label: 'customer_name', required: true, example: 'Care Apollo Super Speciality' },
+      { key: 'invoice_number', label: 'invoice_number', required: true, example: 'INV-2025-0891' },
+      { key: 'invoice_date', label: 'invoice_date', required: true, example: '2026-01-15' },
+      { key: 'amount', label: 'amount', required: true, example: '185000' },
+      { key: 'received', label: 'received', required: false, example: '50000' },
+      { key: 'balance', label: 'balance', required: true, example: '135000' },
+      { key: 'due_date', label: 'due_date', required: true, example: '2026-02-15' },
+    ],
+    sampleRows: [
+      {
+        customer_name: 'Care Apollo Super Speciality',
+        invoice_number: 'INV-2025-0891',
+        invoice_date: '2026-01-15',
+        amount: '185000',
+        received: '50000',
+        balance: '135000',
+        due_date: '2026-02-15',
+      },
+    ],
+  },
+  opening_payables: {
+    id: 'opening_payables',
+    name: 'Opening Payables (Supplier Outstanding)',
+    description: 'Tally export of supplier opening payables, purchase bills, and pending vendor dues',
+    filename: 'icon_opening_payables_template.csv',
+    headers: [
+      { key: 'supplier_name', label: 'supplier_name', required: true, example: 'Redington India Ltd' },
+      { key: 'invoice_number', label: 'invoice_number', required: true, example: 'RED-BLL-4421' },
+      { key: 'amount', label: 'amount', required: true, example: '320000' },
+      { key: 'paid', label: 'paid', required: false, example: '120000' },
+      { key: 'balance', label: 'balance', required: true, example: '200000' },
+      { key: 'due_date', label: 'due_date', required: true, example: '2026-02-28' },
+    ],
+    sampleRows: [
+      {
+        supplier_name: 'Redington India Ltd',
+        invoice_number: 'RED-BLL-4421',
+        amount: '320000',
+        paid: '120000',
+        balance: '200000',
+        due_date: '2026-02-28',
+      },
+    ],
+  },
 };
+
+/**
+ * Checks if a file is a proprietary Tally binary file (.1800, .TSF, etc.)
+ */
+export function isTallyBinaryFile(filename: string): boolean {
+  return /\.(1800|tsf|dat|bin|enc|mdf|ldf|db)$/i.test(filename);
+}
+
+export type DuplicateClassification =
+  | 'NEW'
+  | 'EXACT_DUPLICATE'
+  | 'POSSIBLE_DUPLICATE'
+  | 'INVALID'
+  | 'HUMAN_REVIEW_REQUIRED';
+
+export interface ClassifiedImportRow {
+  rowIndex: number;
+  data: Record<string, string>;
+  classification: DuplicateClassification;
+  reason: string;
+  matchedExistingRecord?: {
+    id: string;
+    name: string;
+    gstin?: string | null;
+    phone?: string | null;
+  };
+}

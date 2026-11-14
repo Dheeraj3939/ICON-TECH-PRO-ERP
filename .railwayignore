@@ -1,0 +1,19 @@
+# Exclude local backups, caches, secrets, and non-runtime directories from Railway upload
+backups/
+node_modules/
+.next/
+.next-uat/
+out/
+coverage/
+.git/
+.vercel/
+.env
+.env*.local
+data/
+.icon_durable_state/
+.icon_locks/
+scratch/
+test/
+*.tsbuildinfo
+*.log
+*.md

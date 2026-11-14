@@ -270,3 +270,121 @@ export interface ZohoEntityMappingRecord {
   last_synced_at: string;
   metadata?: Record<string, any>;
 }
+
+// ----------------------------------------------------------------------------
+// Zoho Organization & Mail Architecture Types
+// ----------------------------------------------------------------------------
+
+export type ZohoIntegrationType = 'ZOHO_CRM' | 'ZOHO_MAIL' | 'ZOHO_ORGANIZATION';
+
+export type ZohoMailboxType = 'INDIVIDUAL' | 'SHARED';
+export type ZohoMailboxStatus = 'ACTIVE' | 'DISABLED' | 'SUSPENDED';
+export type ZohoMappingStatus = 'CONFIRMED' | 'PROPOSED' | 'HUMAN_REVIEW_REQUIRED' | 'DEACTIVATED';
+export type ZohoIntegrationHealthStatus = 'HEALTHY' | 'WARNING' | 'ERROR' | 'UNCONFIGURED';
+
+export interface ZohoOrganization {
+  id: string;
+  zoho_org_id: string;
+  org_name: string;
+  domain_name: string;
+  primary_admin_email: string;
+  authorized_by_user_id?: string;
+  authorized_by_name?: string;
+  connection_status: 'CONNECTED' | 'NOT_CONNECTED' | 'DEGRADED' | 'REAUTH_REQUIRED';
+  health_status: ZohoIntegrationHealthStatus;
+  mail_enabled: boolean;
+  crm_enabled: boolean;
+  active_mailboxes_count: number;
+  mapped_employees_count: number;
+  last_sync_at?: string;
+  last_token_refresh_at?: string;
+  last_error?: string | null;
+  metadata?: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ZohoMailUser {
+  id: string; // zuid
+  zoho_org_id: string;
+  email_address: string;
+  display_name?: string;
+  first_name?: string;
+  last_name?: string;
+  role: 'admin' | 'member';
+  status: ZohoMailboxStatus;
+  is_shared_mailbox: boolean;
+  mailbox_zuid?: string;
+  raw_metadata?: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmployeeZohoMailboxMapping {
+  id: string;
+  employee_id: string;
+  employee_name?: string;
+  employee_role?: string;
+  zoho_org_id: string;
+  zoho_user_id: string;
+  email_address: string;
+  mailbox_type: ZohoMailboxType;
+  mailbox_status: ZohoMailboxStatus;
+  mapping_status: ZohoMappingStatus;
+  sync_enabled: boolean;
+  notes?: string;
+  last_synced_at?: string;
+  disconnected_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ZohoOrganizationConnectionInfo {
+  organization: ZohoOrganization | null;
+  mail: {
+    active_mailboxes_count: number;
+    mapped_employees_count: number;
+    unmapped_users_count: number;
+    disabled_users_count: number;
+    last_sync_at?: string;
+  };
+  crm: {
+    connected: boolean;
+    status: 'CONNECTED' | 'NOT_CONNECTED' | 'EXPIRED';
+    last_sync_at?: string;
+    records_synced_total?: number;
+  };
+  token: {
+    expires_at?: number;
+    is_valid: boolean;
+    granted_scopes: string[];
+    authorized_by?: string;
+  };
+  health: {
+    overall: ZohoIntegrationHealthStatus;
+    crm_healthy: boolean;
+    mail_healthy: boolean;
+    token_healthy: boolean;
+    last_checked_at: string;
+    messages: string[];
+  };
+}
+
+export interface ZohoMailSyncResult {
+  success: boolean;
+  syncLogId: string;
+  organizationId: string;
+  usersDiscovered: number;
+  mappingsCreated: number;
+  mappingsUpdated: number;
+  mappingsUnchanged: number;
+  unmappedUsers: number;
+  sharedMailboxesCount: number;
+  individualMailboxesCount: number;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  message?: string;
+  error?: string;
+}
+
