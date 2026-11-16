@@ -66,9 +66,16 @@ export async function getCustomers(filters?: CustomerFilters): Promise<{
       if (filters?.search) {
         const s = sanitizeSearchTerm(filters.search);
         if (s) {
-          query = query.or(
-            `customer_code.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,gstin.ilike.%${s}%,email.ilike.%${s}%`
-          );
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+          if (isUuid) {
+            query = query.or(
+              `id.eq.${s},customer_code.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%`
+            );
+          } else {
+            query = query.or(
+              `customer_code.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,gstin.ilike.%${s}%,email.ilike.%${s}%`
+            );
+          }
         }
       }
       query = query.order('created_at', { ascending: false });

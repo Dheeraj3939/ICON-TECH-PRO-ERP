@@ -4,7 +4,7 @@ import { getAuthenticatedUser } from '@/lib/auth/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { canViewPurchaseCosts } from '@/lib/utils/margin';
-import { getCustomers } from '@/lib/actions/customers';
+import { getCustomers, getCustomerById } from '@/lib/actions/customers';
 import { getEnquiries } from '@/lib/actions/enquiries';
 import { getSiteVisits, getInstallations } from '@/lib/actions/operations';
 import { getQuotations } from '@/lib/actions/quotations';
@@ -127,18 +127,19 @@ export async function getCustomer360Data(
       return { success: false, error: 'Customer identifier is required' };
     }
 
-    // Load customer directory
-    const custRes = await getCustomers({ search: term });
-    let customer = custRes.customers.find(
-      (c) =>
-        c.id === term ||
-        c.customer_code.toLowerCase() === term.toLowerCase() ||
-        c.customer_name.toLowerCase() === term.toLowerCase()
-    );
+    // Direct lookup by ID or Code first
+    let customer = await getCustomerById(term);
 
-    // Fallback search if exact id did not match search filter
-    if (!customer && custRes.customers.length > 0) {
-      customer = custRes.customers[0];
+    // Fallback search in customer directory
+    if (!customer) {
+      const custRes = await getCustomers({ search: term });
+      customer =
+        custRes.customers.find(
+          (c) =>
+            c.id === term ||
+            c.customer_code.toLowerCase() === term.toLowerCase() ||
+            c.customer_name.toLowerCase() === term.toLowerCase()
+        ) || (custRes.customers.length > 0 ? custRes.customers[0] : null);
     }
 
     if (!customer) {
@@ -152,8 +153,8 @@ export async function getCustomer360Data(
 
     const matchesCust = (id?: string | null, name?: string | null, comp?: string | null) => {
       if (id && (id === custId || id === custCode)) return true;
-      if (name && name.toLowerCase().includes(custName)) return true;
-      if (comp && compName && comp.toLowerCase().includes(compName)) return true;
+      if (name && (name.toLowerCase().includes(custName) || (compName && name.toLowerCase().includes(compName)))) return true;
+      if (comp && ((compName && comp.toLowerCase().includes(compName)) || comp.toLowerCase().includes(custName))) return true;
       return false;
     };
 
@@ -227,7 +228,7 @@ export async function getCustomer360Data(
     );
 
     const invoices = (invRes.invoices || []).filter((inv) =>
-      matchesCust(inv.customer_id, inv.customer_name)
+      matchesCust(inv.customer_id, inv.customer_name, inv.company_name)
     );
 
     const payments = (payRes?.payments || []).filter((p) =>

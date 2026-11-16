@@ -91,10 +91,12 @@ export async function getInvoices(filters?: {
       if (filters?.status && filters.status !== 'ALL') {
         query = query.eq('status', filters.status);
       }
-      if (filters?.customer_id) {
+      if (filters?.customer_id && filters?.search) {
+        const s = sanitizeSearchTerm(filters.search);
+        query = query.or(`customer_id.eq.${filters.customer_id},customer_name.ilike.%${s}%,company_name.ilike.%${s}%,invoice_number.ilike.%${s}%`);
+      } else if (filters?.customer_id) {
         query = query.eq('customer_id', filters.customer_id);
-      }
-      if (filters?.search) {
+      } else if (filters?.search) {
         const s = sanitizeSearchTerm(filters.search);
         if (s) {
           query = query.or(`invoice_number.ilike.%${s}%,customer_name.ilike.%${s}%,company_name.ilike.%${s}%`);
@@ -140,7 +142,7 @@ export async function getInvoices(filters?: {
 }
 
 export async function getPayments(): Promise<{ payments: Payment[]; total: number }> {
-  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
+  await requireRole(['Managing Director', 'Accounts', 'Admin', 'Admin / BDM', 'Sales Executive']);
   const store = getPaymentsStore();
 
   const isOnline = await isSupabaseAvailable();
