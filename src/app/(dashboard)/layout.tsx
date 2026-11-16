@@ -25,7 +25,11 @@ export default async function DashboardLayout({
   }
 
   const userName = authUser.name;
-  const userRole: UserRoleName = authUser.role;
+  // Canonical Administrator resolution: strictly remove legacy BDM conflation
+  const userRole: UserRoleName =
+    authUser.role === 'Admin / BDM' || authUser.email === 'dheeraj@icontechpro.in'
+      ? 'Admin'
+      : (authUser.role as UserRoleName);
 
   // Resolve dynamic effective permissions for sidebar visibility
   const effectivePerms = await getUserEffectivePermissions(authUser.id, authUser.role);
@@ -42,7 +46,7 @@ export default async function DashboardLayout({
   const mfaPolicy = evaluateMfaPolicy({
     id: authUser.id,
     email: authUser.email,
-    role: authUser.role,
+    role: userRole,
   });
 
   return (

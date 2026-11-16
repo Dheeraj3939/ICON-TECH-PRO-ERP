@@ -85,11 +85,10 @@ export default function ReportsPage() {
     }
   };
 
-  // Compute live sales rep performance
+  // Compute live sales rep performance (Pure Commercial Sales Executives)
   const repTargets: Record<string, { role: string; target: number; targetMargin: number }> = {
-    'Dheeraj': { role: 'Admin / BDM', target: 800000, targetMargin: 22.8 },
-    'Vineet Babu': { role: 'BDM', target: 400000, targetMargin: 22.2 },
-    'Reshma': { role: 'Sales Executive', target: 350000, targetMargin: 21.1 },
+    'Vineet Babu': { role: 'Corporate Sales Executive', target: 800000, targetMargin: 22.8 },
+    'Reshma': { role: 'Enterprise Sales Executive', target: 500000, targetMargin: 22.2 },
   };
 
   const repPerformance = Object.keys(repTargets).map((name) => {

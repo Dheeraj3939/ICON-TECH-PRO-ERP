@@ -97,7 +97,7 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
 }
 
 export async function getAuditLogs(): Promise<AuditLog[]> {
-  await requireRole(['Managing Director', 'Admin / BDM']);
+  await requireRole(['Managing Director', 'Admin']);
   return getAuditLogsStore();
 }
 
@@ -152,7 +152,7 @@ export async function getSalesPipelineKPIs(): Promise<SalesPipelineKPIs> {
 }
 
 export async function getRevenueByCategory(): Promise<RevenueByCategory[]> {
-  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
+  await requireRole(['Managing Director', 'Accounts', 'Admin']);
   const [orderRes, prodRes] = await Promise.all([
     getOrders(),
     getProducts(),
@@ -205,7 +205,7 @@ export async function getRevenueByCategory(): Promise<RevenueByCategory[]> {
 }
 
 export async function getCustomerLTVMetrics(limit = 10): Promise<CustomerLTVMetric[]> {
-  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
+  await requireRole(['Managing Director', 'Accounts', 'Admin']);
   const [custRes, orderRes, invRes] = await Promise.all([
     getCustomers(),
     getOrders(),
@@ -251,7 +251,7 @@ export async function getCustomerLTVMetrics(limit = 10): Promise<CustomerLTVMetr
 }
 
 export async function getCollectionEfficiencyMetrics(): Promise<CollectionEfficiencyMetric> {
-  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
+  await requireRole(['Managing Director', 'Accounts', 'Admin']);
   const [invRes, agingRes] = await Promise.all([
     getInvoices(),
     getAccountsAging(),
@@ -290,7 +290,7 @@ export async function getCollectionEfficiencyMetrics(): Promise<CollectionEffici
 }
 
 export async function getBusinessKPIsSummary(): Promise<BusinessKPIsSummary> {
-  await requireRole(['Managing Director', 'Accounts', 'Admin / BDM']);
+  await requireRole(['Managing Director', 'Accounts', 'Admin']);
   const [pipeline, revenue_by_category, top_customers_by_ltv, collection_efficiency] = await Promise.all([
     getSalesPipelineKPIs(),
     getRevenueByCategory(),

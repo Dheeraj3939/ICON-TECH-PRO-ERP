@@ -237,8 +237,8 @@ function parseTallyVouchers(xmlText) {
       date = `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`;
     }
     const reference = parseXmlTag(block, 'REFERENCE');
-    const partyName = parseXmlTag(block, 'PARTYLEDGERNAME');
-    const partyGstin = parseXmlTag(block, 'PARTYGSTIN');
+    let partyName = parseXmlTag(block, 'PARTYLEDGERNAME') || parseXmlTag(block, 'PARTYNAME') || parseXmlTag(block, 'BASICBUYERNAME');
+    let partyGstin = parseXmlTag(block, 'PARTYGSTIN') || parseXmlTag(block, 'PARTYGSTINNUMBER');
     const narration = parseXmlTag(block, 'NARRATION');
     const guid = parseXmlTag(block, 'GUID');
     const alterId = parseInt(parseXmlTag(block, 'ALTERID'), 10) || 0;
@@ -273,6 +273,20 @@ function parseTallyVouchers(xmlText) {
 
       ledgerEntries.push({
         ledgerName,
+        isDeemedPositive,
+        amount,
+        billAllocations,
+      });
+    }
+
+    if (!partyName && ledgerEntries.length > 0) {
+      const candidate = ledgerEntries.find(
+        (e) => !/sales|purchase|tax|gst|cgst|sgst|igst|round|duty|discount|freight/i.test(e.ledgerName)
+      );
+      if (candidate) {
+        partyName = candidate.ledgerName;
+      }
+    }
         isDeemedPositive,
         amount,
         billAllocations,

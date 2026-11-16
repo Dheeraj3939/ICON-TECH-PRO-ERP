@@ -488,7 +488,7 @@ export function Sidebar({ userRole = 'Managing Director', userEmail, activeEntit
                 Active Role
               </span>
               <span className="text-xs font-bold text-slate-200 truncate block">
-                {userRole}
+                {userRole === 'Admin / BDM' ? 'Admin' : userRole}
               </span>
             </div>
           </div>

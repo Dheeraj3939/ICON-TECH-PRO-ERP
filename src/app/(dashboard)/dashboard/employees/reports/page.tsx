@@ -23,7 +23,7 @@ export default async function HRReportsPage() {
   const authUser = await getAuthenticatedUser();
   const userRole = authUser?.role || 'Managing Director';
 
-  const canViewPayrollReports = ['Managing Director', 'Admin / BDM', 'Accounts'].includes(userRole);
+  const canViewPayrollReports = ['Managing Director', 'Admin', 'Accounts'].includes(userRole);
 
   const { employees } = await getEmployees();
   const { attendance } = await getAttendance();

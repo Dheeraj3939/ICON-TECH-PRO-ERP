@@ -1076,8 +1076,17 @@ export default function UnifiedOperationsDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
               {enquiries.slice(0, 6).map((enq) => {
                 const quoteMatch = quotations.find((q) => q.customer_name === enq.customer_name || q.customer_name === enq.company_name);
-                const orderMatch = orders.find((o) => o.customer_name === enq.customer_name);
-                const displayValue = quoteMatch ? `₹${quoteMatch.grand_total.toLocaleString('en-IN')}` : '₹1,25,000';
+                const orderMatch = orders.find((o) => o.customer_name === enq.customer_name || o.customer_name === enq.company_name);
+                const invMatch = invoices.find((inv) => inv.customer_name === enq.customer_name || inv.company_name === enq.company_name);
+                const displayValue = orderMatch
+                  ? `₹${Number(orderMatch.total_amount).toLocaleString('en-IN')}`
+                  : quoteMatch
+                  ? `₹${Number(quoteMatch.grand_total).toLocaleString('en-IN')}`
+                  : invMatch
+                  ? `₹${Number(invMatch.grand_total).toLocaleString('en-IN')}`
+                  : enq.estimated_budget
+                  ? `₹${Number(enq.estimated_budget).toLocaleString('en-IN')}`
+                  : '₹0';
 
                 return (
                   <div

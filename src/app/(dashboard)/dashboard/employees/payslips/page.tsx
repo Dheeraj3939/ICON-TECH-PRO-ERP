@@ -20,7 +20,7 @@ export default async function PayslipsPage() {
   const authUser = await getAuthenticatedUser();
   const userRole = authUser?.role || 'Managing Director';
 
-  const isAuthorized = ['Managing Director', 'Admin / BDM', 'Accounts'].includes(userRole);
+  const isAuthorized = ['Managing Director', 'Admin', 'Accounts'].includes(userRole);
 
   if (!isAuthorized) {
     return (

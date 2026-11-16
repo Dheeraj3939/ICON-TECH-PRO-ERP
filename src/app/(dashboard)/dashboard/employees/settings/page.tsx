@@ -19,7 +19,7 @@ export default async function HRSettingsPage() {
   const authUser = await getAuthenticatedUser();
   const userRole = authUser?.role || 'Managing Director';
 
-  const canManageSettings = ['Managing Director', 'Admin / BDM'].includes(userRole);
+  const canManageSettings = ['Managing Director', 'Admin'].includes(userRole);
 
   const departments = [
     'Executive Management',

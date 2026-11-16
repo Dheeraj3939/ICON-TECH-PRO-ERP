@@ -47,7 +47,7 @@ export function EmployeeDirectoryClient({
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  const canAddEmployee = ['Managing Director', 'Admin / BDM'].includes(userRole);
+  const canAddEmployee = ['Managing Director', 'Admin'].includes(userRole);
 
   const [formData, setFormData] = useState({
     full_name: '',

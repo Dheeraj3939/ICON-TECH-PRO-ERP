@@ -23,7 +23,7 @@ export default async function PayrollPage() {
   const userRole = authUser?.role || 'Managing Director';
 
   // Strict role security gate
-  const isAuthorized = ['Managing Director', 'Admin / BDM', 'Accounts'].includes(userRole);
+  const isAuthorized = ['Managing Director', 'Admin', 'Accounts'].includes(userRole);
 
   if (!isAuthorized) {
     return (

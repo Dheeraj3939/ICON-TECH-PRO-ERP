@@ -384,20 +384,21 @@ export function Header({
                 {userName}
               </div>
               <div className="text-[10px] font-medium text-slate-500 truncate max-w-[110px]">
-                {userRole}
+                {userRole === 'Admin / BDM' ? 'Admin' : userRole}
               </div>
             </div>
             <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isMenuOpen ? 'rotate-180' : ''}`} />
           </button>
 
-          {/* Sign Out Action */}
+          {/* Prominent Header Sign Out / Logout Button */}
           <form action={logout}>
             <button
               type="submit"
-              title="Sign Out"
-              className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition duration-150"
+              title="Sign Out of ERP"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 shadow-sm transition duration-150 cursor-pointer"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-3.5 h-3.5 text-rose-600" />
+              <span className="hidden xs:inline sm:inline">Logout</span>
             </button>
           </form>
 

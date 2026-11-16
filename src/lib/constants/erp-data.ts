@@ -367,9 +367,8 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 
 // Verified 4 Tier Discount Rules from Database
 export const DISCOUNT_APPROVAL_RULES = [
-  { role: 'Sales Executive', maxDiscountPct: 5, requiresApprovalFrom: 'BDM' },
-  { role: 'BDM', maxDiscountPct: 15, requiresApprovalFrom: 'Admin / BDM' },
-  { role: 'Admin / BDM', maxDiscountPct: 25, requiresApprovalFrom: 'Managing Director' },
+  { role: 'Sales Executive', maxDiscountPct: 5, requiresApprovalFrom: 'Admin' },
+  { role: 'Admin', maxDiscountPct: 25, requiresApprovalFrom: 'Managing Director' },
   { role: 'Managing Director', maxDiscountPct: 100, requiresApprovalFrom: null },
 ];
 
@@ -1605,7 +1604,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'AUD005',
     timestamp: '2026-09-04 13:40:00',
-    user_name: 'Dheeraj (Admin / BDM)',
+    user_name: 'B V Dheeraj Reddy (Admin)',
     action: 'CREATE_QUOTATION',
     module: 'Quotations',
     details: 'Generated Quotation QT260004 for 3x 75" ViewSonic Interactive Panels for TSTA (₹6,54,900)',
@@ -1629,7 +1628,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'AUD002',
     timestamp: '2026-09-04 13:20:00',
-    user_name: 'Vineet Babu (BDM)',
+    user_name: 'Vineet Babu (Corporate Sales)',
     action: 'CONFIRM_ORDER',
     module: 'Orders',
     details: 'Converted Quotation QT260001 to Confirmed Order ORD260002 for ABC Technologies (₹1,08,324)',
@@ -1637,7 +1636,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'AUD001',
     timestamp: '2026-09-04 13:10:00',
-    user_name: 'Dheeraj (Admin / BDM)',
+    user_name: 'B V Dheeraj Reddy (Admin)',
     action: 'FOLLOW_UP_LEAD',
     module: 'Leads',
     details: 'Followed up with Rajesh Sharma (Swan Solutions) confirming delivery via Professional Couriers HYD-892109',

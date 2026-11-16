@@ -69,7 +69,7 @@ export function EmployeeProfile360Client({
 }: EmployeeProfile360ClientProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'salary' | 'payslips' | 'documents' | 'access'>('overview');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const canEdit = ['Managing Director', 'Admin / BDM'].includes(userRole);
+  const canEdit = ['Managing Director', 'Admin'].includes(userRole);
 
   const tabs = [
     { id: 'overview', label: '1. Overview & Bio', icon: User, allowed: true },

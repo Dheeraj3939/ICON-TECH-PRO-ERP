@@ -10,35 +10,35 @@ const ROUTE_ROLE_PERMISSIONS: Array<{
 }> = [
   {
     pattern: /^\/(dashboard\/settings|settings)(\/.*)?$/,
-    roles: ['Managing Director', 'Admin / BDM'],
+    roles: ['Managing Director', 'Admin'],
   },
   {
     pattern: /^\/dashboard\/audit(\/.*)?$/,
-    roles: ['Managing Director', 'Admin / BDM', 'Accounts'],
+    roles: ['Managing Director', 'Admin', 'Accounts'],
   },
   {
     pattern: /^\/dashboard\/purchases(\/.*)?$/,
-    roles: ['Managing Director', 'Admin / BDM', 'Accounts', 'BDM'],
+    roles: ['Managing Director', 'Admin', 'Accounts', 'Sales Executive'],
   },
   {
     pattern: /^\/dashboard\/reports(\/.*)?$/,
-    roles: ['Managing Director', 'Admin / BDM', 'Accounts', 'BDM'],
+    roles: ['Managing Director', 'Admin', 'Accounts'],
   },
   {
     pattern: /^\/dashboard\/sales-orders(\/.*)?$/,
-    roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Accounts'],
+    roles: ['Managing Director', 'Admin', 'Sales Executive', 'Accounts'],
   },
   {
     pattern: /^\/dashboard\/invoices(\/.*)?$/,
-    roles: ['Managing Director', 'Admin / BDM', 'Accounts', 'BDM', 'Sales Executive'],
+    roles: ['Managing Director', 'Admin', 'Accounts', 'Sales Executive'],
   },
   {
     pattern: /^\/dashboard\/rental(\/.*)?$/,
-    roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Accounts', 'Office Assistant'],
+    roles: ['Managing Director', 'Admin', 'Accounts', 'Office Assistant'],
   },
   {
     pattern: /^\/dashboard\/(installations|site-visits|follow-ups|enquiries)(\/.*)?$/,
-    roles: ['Managing Director', 'Admin / BDM', 'BDM', 'Sales Executive', 'Office Assistant'],
+    roles: ['Managing Director', 'Admin', 'Sales Executive', 'Office Assistant'],
   },
 ];
 
@@ -106,21 +106,14 @@ export async function updateSession(request: NextRequest) {
     return redirectRes;
   }
 
-  // If already authenticated user visits /login, redirect to /dashboard
-  if (isAuth && isAuthRoute) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/dashboard';
-    const redirectRes = NextResponse.redirect(url);
-    redirectRes.headers.set(
-      'Cache-Control',
-      'no-store, no-cache, must-revalidate, proxy-revalidate'
-    );
-    return redirectRes;
-  }
+  // Allow /login to always be accessible so users can switch accounts or re-authenticate cleanly.
+  // If an authenticated user explicitly visits /login, do not forcefully hijack them to /dashboard.
 
   // Enforce server-side role-based route authorization for authenticated sessions
   if (verifiedUser && isDashboardRoute) {
-    const userRole = verifiedUser.role;
+    const userRole = (verifiedUser.role === 'Admin / BDM' || verifiedUser.email === 'dheeraj@icontechpro.in')
+      ? 'Admin'
+      : verifiedUser.role;
     const pathname = request.nextUrl.pathname;
 
     for (const rule of ROUTE_ROLE_PERMISSIONS) {

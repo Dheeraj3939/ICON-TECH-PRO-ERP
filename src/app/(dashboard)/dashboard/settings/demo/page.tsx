@@ -176,7 +176,7 @@ export default function DemoSettingsPage() {
             </h4>
             <ul className="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
               <li>Mode switches are cryptographically logged to the audit ledger.</li>
-              <li>Only Managing Director and Admin / BDM may toggle this setting.</li>
+              <li>Only Managing Director and Admin may toggle this setting.</li>
               <li>Automatic session timeout resets training view after 24 hours.</li>
             </ul>
           </div>

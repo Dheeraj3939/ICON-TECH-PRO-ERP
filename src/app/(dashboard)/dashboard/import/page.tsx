@@ -220,7 +220,7 @@ export default function BulkImportPage() {
         </div>
         <h2 className="text-xl font-black text-slate-900">Access Restricted</h2>
         <p className="text-sm text-slate-600">
-          Your role (<span className="font-semibold text-slate-900">{currentUser.role}</span>) does not have authorization to perform bulk database imports. Only Managing Directors and Admin / BDMs are permitted to import datasets into the master repository.
+          Your role (<span className="font-semibold text-slate-900">{currentUser.role}</span>) does not have authorization to perform bulk database imports. Only Managing Directors and System Administrators are permitted to import datasets into the master repository.
         </p>
         <div className="pt-4">
           <Link

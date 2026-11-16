@@ -41,8 +41,8 @@ export default async function AttendancePage({
   const corrections = await getAttendanceCorrections();
   const { employees } = await getEmployees();
 
-  const canApproveCorrections = ['Managing Director', 'Admin / BDM'].includes(userRole);
-  const canRecordAttendance = ['Managing Director', 'Admin / BDM', 'Office Assistant'].includes(userRole);
+  const canApproveCorrections = ['Managing Director', 'Admin'].includes(userRole);
+  const canRecordAttendance = ['Managing Director', 'Admin', 'Office Assistant'].includes(userRole);
 
   return (
     <div className="space-y-6">

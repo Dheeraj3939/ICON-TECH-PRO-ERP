@@ -52,7 +52,7 @@ export default async function EmployeesPage({
   const { attendance: todayAttendance } = await getAttendance({ date: today });
 
   let payrollStatusText = 'Locked';
-  let canViewPayroll = ['Managing Director', 'Admin / BDM', 'Accounts'].includes(userRole);
+  let canViewPayroll = ['Managing Director', 'Admin', 'Accounts'].includes(userRole);
 
   if (canViewPayroll) {
     try {

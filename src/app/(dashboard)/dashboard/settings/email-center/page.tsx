@@ -566,10 +566,10 @@ export default function CentralEmailCenterPage() {
             </div>
 
             <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2">
-              <h4 className="font-bold text-slate-900 text-xs">Admin / BDM</h4>
+              <h4 className="font-bold text-slate-900 text-xs">System Administrator & IT Governance</h4>
               <ul className="list-disc pl-4 space-y-1 text-slate-600 text-[11px]">
-                <li>Operational reports, dispatches, and sales-management overviews.</li>
-                <li>Salesperson conversion velocity and team follow-up activity.</li>
+                <li>System audit events, security health, Tally sync telemetry, and user access changes.</li>
+                <li>Email queue health and server diagnostic notifications.</li>
               </ul>
             </div>
 

@@ -45,8 +45,8 @@ export default async function Employee360Page({
   }
 
   // Authoritative Role Filtering for Sensitive HR Tabs
-  const canViewFinancials = ['Managing Director', 'Admin / BDM', 'Accounts'].includes(userRole);
-  const canViewAudits = ['Managing Director', 'Admin / BDM', 'Accounts'].includes(userRole);
+  const canViewFinancials = ['Managing Director', 'Admin', 'Accounts'].includes(userRole);
+  const canViewAudits = ['Managing Director', 'Admin', 'Accounts'].includes(userRole);
 
   // Fetch Attendance for this employee
   const { attendance } = await getAttendance({ employeeId: employee.id });

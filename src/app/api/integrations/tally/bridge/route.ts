@@ -487,6 +487,15 @@ export async function POST(request: NextRequest) {
               customerMatch = newCust;
             }
 
+            if (!customerMatch) {
+              const { data: fallbackCust } = await admin
+                .from('customers')
+                .select('id, customer_name, company_name, gstin')
+                .limit(1)
+                .maybeSingle();
+              customerMatch = fallbackCust;
+            }
+
             if (customerMatch) {
               const subtotal = Math.round((voucher.amount / 1.18) * 100) / 100;
               const gst = Math.round((voucher.amount - subtotal) * 100) / 100;

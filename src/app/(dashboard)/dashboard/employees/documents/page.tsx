@@ -24,7 +24,7 @@ export default async function DocumentsPage() {
   const offerLetters = await getOfferLetters();
   const { employees } = await getEmployees();
 
-  const canManageOffers = ['Managing Director', 'Admin / BDM'].includes(userRole);
+  const canManageOffers = ['Managing Director', 'Admin'].includes(userRole);
 
   return (
     <div className="space-y-6">

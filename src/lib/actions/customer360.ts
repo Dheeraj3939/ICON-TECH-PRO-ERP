@@ -1,6 +1,8 @@
 'use server';
 
 import { getAuthenticatedUser } from '@/lib/auth/session';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { isSupabaseAvailable } from '@/lib/supabase/health';
 import { canViewPurchaseCosts } from '@/lib/utils/margin';
 import { getCustomers } from '@/lib/actions/customers';
 import { getEnquiries } from '@/lib/actions/enquiries';
@@ -318,16 +320,87 @@ export async function getCustomer360Data(
       return false;
     });
 
-    // Linked Tally Sync Status
+    // Inbound & Outbound Tally Synchronization Integration
+    let inboundTallyItems: TallySyncItem[] = [];
+    let tallyReconciliationsList: any[] = [];
+    const isOnlineDb = await isSupabaseAvailable();
+
+    if (isOnlineDb) {
+      try {
+        const admin = createAdminClient();
+        const searchTerms = [
+          customer.company_name,
+          customer.customer_name,
+          customer.gstin,
+        ].filter(Boolean) as string[];
+
+        const orClauses = [
+          `erp_customer_id.eq.${customer.id}`,
+          ...searchTerms.map((t) => `tally_ledger_name.ilike.%${t.replace(/[,%()]/g, ' ').trim()}%`),
+        ].join(',');
+
+        const [matchRes, reconRes] = await Promise.all([
+          admin.from('tally_customer_ledger_matches').select('*').or(orClauses),
+          admin
+            .from('tally_reconciliations')
+            .select('*')
+            .or(`erp_id.eq.${customer.id},${searchTerms.map((t) => `notes.ilike.%${t.replace(/[,%()]/g, ' ').trim()}%`).join(',')}`)
+            .order('tally_date', { ascending: false })
+            .limit(100),
+        ]);
+
+        const matches = matchRes.data || [];
+        tallyReconciliationsList = reconRes.data || [];
+
+        // Map verified Tally ledger matches
+        for (const m of matches) {
+          inboundTallyItems.push({
+            id: m.id,
+            entity_type: 'CUSTOMER',
+            entity_id: m.erp_customer_id || customer.id,
+            entity_number: m.tally_ledger_name,
+            tally_voucher_type: `Tally Ledger (${m.tally_parent_group})`,
+            payload_summary: `Reconciliation Status: ${m.verification_status} (Confidence: ${m.match_confidence_pct}%)`,
+            status: 'SUCCESS',
+            retry_count: 0,
+            max_retries: 3,
+            created_at: m.created_at || new Date().toISOString(),
+            synced_at: m.created_at || new Date().toISOString(),
+          });
+        }
+
+        // Map synchronized Tally vouchers
+        for (const r of tallyReconciliationsList) {
+          inboundTallyItems.push({
+            id: r.id,
+            entity_type: (r.entity_type === 'PURCHASE_INVOICE' ? 'PURCHASE_ORDER' : r.entity_type) as any,
+            entity_id: r.erp_id || r.tally_voucher_number,
+            entity_number: r.tally_voucher_number || r.erp_number || 'VOUCHER',
+            tally_voucher_type: r.notes || r.entity_type,
+            payload_summary: `Amount: ₹${Number(r.tally_amount || 0).toLocaleString('en-IN')} • Date: ${r.tally_date || 'N/A'} • Status: ${r.recon_status}`,
+            status: 'SUCCESS',
+            retry_count: 0,
+            max_retries: 3,
+            created_at: r.last_checked_at || new Date().toISOString(),
+            synced_at: r.last_checked_at || new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.warn('Customer 360 Tally data enrichment warning:', err);
+      }
+    }
+
     const rawTally = tallyRes?.queue || [];
-    const tallySyncItems: TallySyncItem[] = rawTally.filter((t: TallySyncItem) => {
+    const outboundTallyItems: TallySyncItem[] = rawTally.filter((t: TallySyncItem) => {
       if (t.entity_id === custId || t.entity_id === custCode) return true;
       if (invoices.some((inv) => inv.id === t.entity_id || inv.invoice_number === t.entity_id)) return true;
       if (orders.some((ord) => ord.id === t.entity_id || ord.order_number === t.entity_id)) return true;
       return false;
     });
 
-    // Compute Financial Metrics
+    const tallySyncItems = [...inboundTallyItems, ...outboundTallyItems];
+
+    // Compute Financial Metrics (Bridging ERP Billing & Tally Inbound Transactions)
     let totalInvoiced = 0;
     let totalCollected = 0;
     let balanceDue = 0;
@@ -344,11 +417,24 @@ export async function getCustomer360Data(
       }
     });
 
-    const totalReceipts = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    // Incorporate Tally historical sales & collections
+    const tallyPayments = tallyReconciliationsList
+      .filter((r) => r.entity_type === 'PAYMENT' || r.notes?.toLowerCase().includes('receipt'))
+      .reduce((sum, r) => sum + (Number(r.tally_amount) || 0), 0);
+
+    const tallySales = tallyReconciliationsList
+      .filter((r) => r.entity_type === 'INVOICE' || r.notes?.toLowerCase().includes('icon'))
+      .reduce((sum, r) => sum + (Number(r.tally_amount) || 0), 0);
+
+    if (tallySales > totalInvoiced) {
+      totalInvoiced = tallySales;
+    }
+
+    const totalReceipts = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + tallyPayments;
     if (totalReceipts > totalCollected) {
       totalCollected = totalReceipts;
-      balanceDue = Math.max(0, totalInvoiced - totalCollected);
     }
+    balanceDue = Math.max(0, totalInvoiced - totalCollected);
 
     const creditLimit = customer.credit_limit || 0;
     const creditUtilizationPct = creditLimit > 0 ? Math.min(100, Math.round((balanceDue / creditLimit) * 100)) : 0;
@@ -463,6 +549,21 @@ export async function getCustomer360Data(
         status: 'Completed',
         badge: 'Tally Inbound',
         referenceCode: p.payment_number,
+      });
+    });
+
+    // Inbound Tally Historical Vouchers & Bank Receipts
+    tallyReconciliationsList.forEach((r) => {
+      timeline.push({
+        id: `timeline-tally-${r.id}`,
+        type: 'TALLY',
+        title: `Tally ${r.entity_type === 'PAYMENT' ? 'Receipt' : 'Voucher'} #${r.tally_voucher_number || r.erp_number}`,
+        subtitle: `${r.notes || 'Synchronized from TallyPrime'} • Amount: ₹${Number(r.tally_amount || 0).toLocaleString('en-IN')}`,
+        timestamp: r.tally_date ? `${r.tally_date}T10:00:00Z` : r.last_checked_at || new Date().toISOString(),
+        amount: Number(r.tally_amount || 0),
+        status: r.recon_status || 'MATCHED',
+        badge: 'Tally Inbound',
+        referenceCode: r.tally_voucher_number || r.erp_number,
       });
     });
 

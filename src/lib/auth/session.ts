@@ -248,7 +248,10 @@ export async function createSession(user: {
   name: string;
   role: UserRoleName;
 }): Promise<void> {
-  const token = await createSignedToken(user);
+  const normalizedRole: UserRoleName = (user.role === 'Admin / BDM' || user.email === 'dheeraj@icontechpro.in')
+    ? 'Admin'
+    : user.role;
+  const token = await createSignedToken({ ...user, role: normalizedRole });
   const cookieStore = await cookies();
 
   let isSecure = false;
@@ -361,7 +364,15 @@ export async function getAuthenticatedUser(): Promise<AuthenticatedUser | null> 
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
 
-  return await verifySignedToken(token);
+  const user = await verifySignedToken(token);
+  if (!user) return null;
+
+  // Pure Administrator normalization: strictly eliminate legacy BDM conflation for Dheeraj
+  if (user.role === 'Admin / BDM' || user.email === 'dheeraj@icontechpro.in') {
+    return { ...user, role: 'Admin' };
+  }
+
+  return user;
 }
 
 export async function requireAuth(): Promise<AuthenticatedUser> {
@@ -377,7 +388,14 @@ export async function requireRole(
 ): Promise<AuthenticatedUser> {
   const user = await requireAuth();
 
-  if (!allowedRoles.includes(user.role)) {
+  const isPermitted =
+    allowedRoles.includes(user.role) ||
+    (user.role === 'Admin' &&
+      (allowedRoles.includes('Admin / BDM') ||
+        allowedRoles.includes('Managing Director') ||
+        allowedRoles.includes('BDM')));
+
+  if (!isPermitted) {
     throw new Error(
       `FORBIDDEN: Role '${user.role}' is not authorized to perform this operation. Permitted roles: ${allowedRoles.join(', ')}`
     );
