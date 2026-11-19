@@ -15,6 +15,11 @@
 # production
 /build
 
+# Tally bridge local state and logs
+tally-bridge.log
+tally-bridge.pid
+tally-bridge-state.json
+
 # misc
 .DS_Store
 *.pem
