@@ -9,6 +9,7 @@ import { getUserEffectivePermissions } from '@/lib/actions/permissions';
 import { DEMO_MODE_COOKIE_NAME } from '@/lib/constants/demo-mode';
 import { UATReviewBanner } from '@/components/uat/UATReviewBanner';
 import { MfaGracePeriodBanner } from '@/components/security/MfaGracePeriodBanner';
+import { SessionIdleLock } from '@/components/security/SessionIdleLock';
 import { evaluateMfaPolicy } from '@/lib/security/mfa-service';
 import type { UserRoleName } from '@/types/database';
 
@@ -79,6 +80,15 @@ export default async function DashboardLayout({
 
         {/* Global Real-Time Work Notification Toaster */}
         <WorkNotificationToaster userRole={userRole} />
+
+        {/* Choice C: 30-Minute Security Inactivity Lock */}
+        <SessionIdleLock
+          userName={userName}
+          userRole={userRole}
+          userEmail={authUser.email}
+          idleTimeoutMinutes={30}
+          warningMinutes={28}
+        />
       </div>
     </div>
   );

@@ -76,7 +76,7 @@ export function renderInvitationEmail(params: InvitationEmailParams): { subject:
       </div>
 
       <p style="font-size: 14px; color: #334155; line-height: 1.6; margin: 16px 0;">
-        Please click the button below to establish your password and complete account activation. This security link is single-use and will expire in ${expiresHours} hours.
+        You can activate your account in one click by choosing <strong>&quot;Sign in with Google&quot;</strong> on the ERP login portal using your invited email (<code style="color: #2563eb;">${email}</code>), or click the button below to establish a dedicated password. This security link will expire in ${expiresHours} hours.
       </p>
 
       <div style="margin: 24px 0;">

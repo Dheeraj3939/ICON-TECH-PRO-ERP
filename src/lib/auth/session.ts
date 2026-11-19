@@ -119,7 +119,9 @@ function getSessionSecret(): string {
 }
 
 export const SESSION_COOKIE_NAME = 'erp_session_token';
-const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 7; // 7 days
+// Enterprise Daily Working Shift: 12-hour duration + 30-min idle lock.
+// Ensures fresh, authenticated sign-in every morning while keeping daytime operations seamless.
+const SESSION_DURATION_SECONDS = 60 * 60 * 12; // 12 hours
 
 async function signWithWebCrypto(payloadStr: string): Promise<string> {
   const enc = new TextEncoder();
