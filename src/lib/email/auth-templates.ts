@@ -76,7 +76,7 @@ export function renderInvitationEmail(params: InvitationEmailParams): { subject:
       </div>
 
       <p style="font-size: 14px; color: #334155; line-height: 1.6; margin: 16px 0;">
-        You can activate your account in one click by choosing <strong>&quot;Sign in with Google&quot;</strong> on the ERP login portal using your invited email (<code style="color: #2563eb;">${email}</code>), or click the button below to establish a dedicated password. This security link will expire in ${expiresHours} hours.
+        You can activate your account in one click by choosing <strong>&quot;Sign in with Zoho&quot;</strong> (for your @icontechpro.in corporate email) or <strong>&quot;Sign in with Google&quot;</strong> (for leadership/Gmail accounts) on the ERP login portal, or click the button below to establish a dedicated password. This security link will expire in ${expiresHours} hours.
       </p>
 
       <div style="margin: 24px 0;">

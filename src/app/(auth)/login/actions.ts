@@ -23,6 +23,8 @@ import {
   verifyMfaAndCompleteLogin,
 } from '@/lib/security/mfa-service';
 import { logEnterpriseAudit } from '@/lib/audit/enterprise-logger';
+import { getZohoOAuthCredentials } from '@/lib/integrations/zoho-env';
+import { generateOAuthState } from '@/lib/integrations/zoho-crypto';
 import type { UserRoleName } from '@/types/database';
 import { redirect } from 'next/navigation';
 
@@ -664,4 +666,37 @@ export async function requestPasswordReset(
     success: true,
     message: 'If an authorized corporate account exists for this email address, password reset instructions have been dispatched.',
   };
+}
+
+/**
+ * Initiates Zoho Mail OAuth 2.0 flow for staff single sign-on.
+ */
+export async function initiateZohoLoginAction(origin?: string): Promise<{ url?: string; error?: string }> {
+  try {
+    const creds = getZohoOAuthCredentials();
+    if (!creds.hasClientId || !creds.clientId) {
+      return { error: 'Zoho OAuth is not configured on this server. Please sign in with your email and password.' };
+    }
+
+    const state = generateOAuthState('USER_LOGIN');
+    const forwardedOrigin = (origin || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    const cleanHost = forwardedOrigin.replace(/^https?:\/\//, '').split('/')[0];
+    const isKnownCloudHost = /^(uat\.icontechpro\.in|erp\.icontechpro\.in|icon-erp-uat-web-production\.up\.railway\.app)$/i.test(cleanHost);
+    const redirectUri = isKnownCloudHost
+      ? `https://${cleanHost}/api/integrations/zoho/callback`
+      : creds.redirectUri;
+
+    const authUrl = new URL(`${creds.accountsUrl}/oauth/v2/auth`);
+    authUrl.searchParams.set('client_id', creds.clientId);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('access_type', 'online');
+    authUrl.searchParams.set('scope', 'AaaServer.profile.READ,ZohoCRM.users.READ');
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('prompt', 'consent');
+
+    return { url: authUrl.toString() };
+  } catch (err: any) {
+    return { error: err?.message || 'Failed to initiate Zoho sign-in.' };
+  }
 }

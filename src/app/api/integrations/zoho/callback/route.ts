@@ -3,7 +3,12 @@ import { verifyOAuthState } from '@/lib/integrations/zoho-crypto';
 import { getZohoOAuthCredentials } from '@/lib/integrations/zoho-env';
 import { saveZohoOAuthTokens } from '@/lib/actions/zoho';
 import { logAuditEvent } from '@/lib/audit/logger';
-import { getAuthenticatedUser } from '@/lib/auth/session';
+import { getAuthenticatedUser, createSession } from '@/lib/auth/session';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { isSupabaseAvailable } from '@/lib/supabase/health';
+import { STAFF_MEMBERS } from '@/lib/constants/erp-data';
+import { logEnterpriseAudit } from '@/lib/audit/enterprise-logger';
+import type { UserRoleName } from '@/types/database';
 import type { ZohoTokenResponse } from '@/types/zoho';
 
 export async function GET(request: NextRequest) {
@@ -146,8 +151,155 @@ export async function GET(request: NextRequest) {
         details: `Zoho token endpoint returned error: ${tokenData.error}`,
       });
 
+      if (verifiedState.userId === 'USER_LOGIN' || verifiedState.userId === 'login') {
+        return NextResponse.redirect(`${redirectOrigin}/login?error=oauth_exchange_failed&provider=Zoho`);
+      }
+
       baseRedirectUrl.searchParams.set('error', `zoho_token_error_${tokenData.error}`);
       return NextResponse.redirect(baseRedirectUrl);
+    }
+
+    // SPECIAL BRANCH: USER AUTHENTICATION / SIGN IN WITH ZOHO
+    if (verifiedState.userId === 'USER_LOGIN' || verifiedState.userId === 'login') {
+      let zohoEmail: string | null = null;
+      let zohoName: string | null = null;
+
+      // 1. Fetch user info from Zoho Accounts
+      try {
+        const userInfoRes = await fetch(`${resolvedAccountsUrl}/oauth/user/info`, {
+          headers: {
+            Authorization: `Zoho-oauthtoken ${tokenData.access_token}`,
+          },
+        });
+        if (userInfoRes.ok) {
+          const info = await userInfoRes.json();
+          zohoEmail = (info.Email || info.email || info.mail || '').toLowerCase().trim();
+          zohoName = info.Display_Name || (info.First_Name ? `${info.First_Name} ${info.Last_Name || ''}`.trim() : null);
+        }
+      } catch (e) {
+        console.warn('Zoho /oauth/user/info lookup failed:', e);
+      }
+
+      // Fallback: Query CRM current user endpoint
+      if (!zohoEmail) {
+        try {
+          const apiDomain = (tokenData.api_domain || apiUrl).replace(/\/+$/, '');
+          const crmUserRes = await fetch(`${apiDomain}/crm/v3/users?type=CurrentUser`, {
+            headers: {
+              Authorization: `Zoho-oauthtoken ${tokenData.access_token}`,
+            },
+          });
+          if (crmUserRes.ok) {
+            const crmData = await crmUserRes.json();
+            const firstUser = crmData?.users?.[0];
+            if (firstUser?.email) {
+              zohoEmail = firstUser.email.toLowerCase().trim();
+              zohoName = firstUser.full_name || zohoName;
+            }
+          }
+        } catch (e) {
+          console.warn('Zoho CRM CurrentUser lookup failed:', e);
+        }
+      }
+
+      if (!zohoEmail) {
+        return NextResponse.redirect(`${redirectOrigin}/login?error=oauth_exchange_failed&provider=Zoho`);
+      }
+
+      // 2. Authoritative Employee Whitelist Verification
+      let authorizedUser: {
+        id: string;
+        email: string;
+        name: string;
+        role: UserRoleName;
+        status: string;
+        can_login: boolean;
+      } | null = null;
+
+      if (await isSupabaseAvailable()) {
+        try {
+          const admin = createAdminClient();
+          const { data: profile } = await admin
+            .from('user_profiles')
+            .select('id, full_name, email, is_active, can_login, status, roles(role_name)')
+            .eq('email', zohoEmail)
+            .maybeSingle();
+
+          if (profile) {
+            authorizedUser = {
+              id: profile.id,
+              email: profile.email,
+              name: profile.full_name || zohoName || zohoEmail.split('@')[0],
+              role: ((profile.roles as any)?.role_name || 'Sales Executive') as UserRoleName,
+              status: profile.status || 'ACTIVE',
+              can_login: profile.can_login !== false && profile.is_active !== false,
+            };
+
+            const updates: Record<string, any> = {
+              last_login_at: new Date().toISOString(),
+            };
+            if (profile.status === 'INVITED') {
+              updates.status = 'ACTIVE';
+            }
+            await admin.from('user_profiles').update(updates).eq('id', profile.id);
+          }
+        } catch (err) {
+          console.warn('Zoho login user profile lookup warning:', err);
+        }
+      }
+
+      // Fallback to static staff definition
+      if (!authorizedUser) {
+        const staticStaff = STAFF_MEMBERS.find((s) => s.email.toLowerCase() === zohoEmail);
+        if (staticStaff) {
+          authorizedUser = {
+            id: staticStaff.id,
+            email: staticStaff.email,
+            name: staticStaff.name,
+            role: staticStaff.role as UserRoleName,
+            status: 'ACTIVE',
+            can_login: true,
+          };
+        }
+      }
+
+      // STRICT WHITELIST DEFENSE: Reject any Zoho account not in employee whitelist
+      if (!authorizedUser) {
+        return NextResponse.redirect(
+          `${redirectOrigin}/login?error=not_invited&email=${encodeURIComponent(zohoEmail)}&provider=Zoho`
+        );
+      }
+
+      // Reject deactivated or suspended employees
+      if (!authorizedUser.can_login || authorizedUser.status === 'SUSPENDED' || authorizedUser.status === 'DEACTIVATED') {
+        return NextResponse.redirect(
+          `${redirectOrigin}/login?error=account_deactivated&email=${encodeURIComponent(zohoEmail)}&provider=Zoho`
+        );
+      }
+
+      // 3. Create authoritative ERP session
+      await createSession({
+        id: authorizedUser.id,
+        email: authorizedUser.email,
+        name: authorizedUser.name,
+        role: authorizedUser.role,
+      });
+
+      await logEnterpriseAudit({
+        employeeId: authorizedUser.id,
+        userName: authorizedUser.name,
+        role: authorizedUser.role,
+        category: 'SECURITY_EVENT',
+        severity: 'INFO',
+        module: 'AUTH',
+        action: 'USER_LOGGED_IN',
+        recordType: 'ZOHO_OAUTH_LOGIN',
+        recordId: authorizedUser.id,
+        reason: 'Zoho Mail corporate account SSO verified against employee whitelist.',
+        outcome: 'SUCCESS',
+      });
+
+      return NextResponse.redirect(`${redirectOrigin}/dashboard`);
     }
 
     if (!tokenData.refresh_token) {

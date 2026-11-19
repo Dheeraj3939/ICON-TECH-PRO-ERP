@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { getLoginUiConfig, getQuickLoginOptions, login, quickLoginAsRole, requestPasswordReset, verifyMfaLoginAction } from './actions';
+import { getLoginUiConfig, getQuickLoginOptions, login, quickLoginAsRole, requestPasswordReset, verifyMfaLoginAction, initiateZohoLoginAction } from './actions';
 import { Shield, Lock, Mail, AlertCircle, Building2, UserCheck, ArrowRight, KeyRound, CheckCircle2, ArrowLeft, Smartphone, ShieldCheck } from 'lucide-react';
 import { ERP_SYSTEM_VERSION } from '@/lib/constants/version';
 type QuickRoleOption = { name: string; role: string; dept: string; badge: string };
@@ -19,6 +19,7 @@ export default function LoginPage() {
   const [quickLoadingRole, setQuickLoadingRole] = useState<string | null>(null);
   const [quickRoles, setQuickRoles] = useState<QuickRoleOption[]>([]);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [zohoLoading, setZohoLoading] = useState(false);
 
   // MFA Challenge State
   const [isMfaMode, setIsMfaMode] = useState(false);
@@ -44,12 +45,13 @@ export default function LoginPage() {
       }
       const authError = params.get('error');
       const email = params.get('email');
+      const provider = params.get('provider') || 'corporate SSO';
       if (authError === 'not_invited') {
-        setError(`Access Denied: The Google account (${email || 'used'}) has not been invited by the Administrator. Please contact info@icontechpro.in to request access.`);
+        setError(`Access Denied: The ${provider} account (${email || 'used'}) has not been invited by the Administrator. Please contact info@icontechpro.in to request access.`);
       } else if (authError === 'account_deactivated') {
         setError(`Account Suspended: Access for (${email || 'your account'}) has been deactivated. Please contact your system administrator.`);
       } else if (authError === 'oauth_exchange_failed') {
-        setError('Google Authentication Failed: Could not complete sign-in. Please try again or use your password.');
+        setError(`${provider} Authentication Failed: Could not complete sign-in. Please try again or use your password.`);
       }
     }
 
@@ -90,6 +92,24 @@ export default function LoginPage() {
     } catch (err: any) {
       setError(err?.message || 'Failed to initiate Google sign-in. Please sign in with password.');
       setGoogleLoading(false);
+    }
+  }
+
+  async function handleZohoSignIn() {
+    setZohoLoading(true);
+    setError(null);
+    try {
+      const origin = window.location.origin;
+      const res = await initiateZohoLoginAction(origin);
+      if (res?.error) {
+        setError(res.error);
+        setZohoLoading(false);
+      } else if (res?.url) {
+        window.location.href = res.url;
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to initiate Zoho sign-in. Please sign in with password.');
+      setZohoLoading(false);
     }
   }
 
@@ -382,30 +402,57 @@ export default function LoginPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Primary Google Enterprise Sign-In */}
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                disabled={googleLoading || loading}
-                className="w-full py-3 px-4 bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded-xl shadow-md border border-slate-200 transition duration-150 flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
-              >
-                {googleLoading ? (
-                  <span className="inline-block w-4 h-4 border-2 border-slate-400 border-t-slate-800 rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                    </svg>
-                    <span>Sign In with Google</span>
-                  </>
-                )}
-              </button>
+            {/* Dual Enterprise Single Sign-On: Google (MD) + Zoho (Staff) */}
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Google Sign In (MD & Leadership) */}
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={googleLoading || zohoLoading || loading}
+                  className="w-full py-2.5 px-3 bg-white hover:bg-slate-100 text-slate-800 text-xs font-bold rounded-xl shadow-sm border border-slate-200 transition duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  title="Sign in with Google / Gmail (Managing Director & Leadership)"
+                >
+                  {googleLoading ? (
+                    <span className="inline-block w-4 h-4 border-2 border-slate-400 border-t-slate-800 rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                      </svg>
+                      <span className="truncate">Google (MD)</span>
+                    </>
+                  )}
+                </button>
 
-              <div className="relative flex items-center justify-center pt-1 pb-1">
+                {/* Zoho Sign In (Staff & Operations - @icontechpro.in) */}
+                <button
+                  type="button"
+                  onClick={handleZohoSignIn}
+                  disabled={googleLoading || zohoLoading || loading}
+                  className="w-full py-2.5 px-3 bg-slate-900/90 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-sm border border-slate-700 transition duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  title="Sign in with your @icontechpro.in Zoho Mail account (Staff & Operations)"
+                >
+                  {zohoLoading ? (
+                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 32 32">
+                        <rect x="2" y="2" width="13" height="13" rx="2.5" fill="#E42528" />
+                        <rect x="17" y="2" width="13" height="13" rx="2.5" fill="#009F4D" />
+                        <rect x="2" y="17" width="13" height="13" rx="2.5" fill="#0078BD" />
+                        <rect x="17" y="17" width="13" height="13" rx="2.5" fill="#F4B400" />
+                      </svg>
+                      <span className="truncate">Zoho (Staff)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="relative flex items-center justify-center pt-1.5 pb-1">
                 <div className="border-t border-slate-700/80 w-full" />
                 <span className="bg-slate-800/90 px-3 text-[10px] uppercase tracking-wider text-slate-400 font-bold absolute">
                   or sign in with password
