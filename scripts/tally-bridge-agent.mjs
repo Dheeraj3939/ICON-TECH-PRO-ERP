@@ -287,11 +287,6 @@ function parseTallyVouchers(xmlText) {
         partyName = candidate.ledgerName;
       }
     }
-        isDeemedPositive,
-        amount,
-        billAllocations,
-      });
-    }
 
     if (voucherAmount === 0 && ledgerEntries.length > 0) {
       voucherAmount = Math.max(...ledgerEntries.map((e) => e.amount));
