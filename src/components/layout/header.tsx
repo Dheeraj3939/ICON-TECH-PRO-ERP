@@ -193,7 +193,7 @@ export function Header({
   return (
     <>
       <CommandPalette />
-      <header className="h-16 bg-white border-b border-slate-200 fixed top-0 right-0 left-0 lg:left-64 z-20 px-3 sm:px-6 flex items-center justify-between">
+      <header className="h-16 bg-white border-b border-slate-200 w-full z-20 px-3 sm:px-6 flex items-center justify-between min-w-0">
         {/* Left: Hamburger menu + Brand Logo + Location */}
         <div className="flex items-center gap-2 sm:gap-3">
           {/* Mobile Hamburger Drawer Trigger */}

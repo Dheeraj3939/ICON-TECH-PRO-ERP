@@ -18,7 +18,7 @@ export function UATReviewBanner({ user }: UATReviewBannerProps) {
 
   return (
     <>
-      <div className="w-full bg-slate-900 border-b border-slate-800 text-white px-4 py-1.5 text-xs flex items-center justify-between gap-3 sticky top-0 z-40 select-none">
+      <div className="w-full bg-slate-900 border-b border-slate-800 text-white px-4 py-1.5 text-xs flex items-center justify-between gap-3 select-none">
         {/* Left: Compact UAT Status & Active Signed-In User */}
         <div className="flex items-center gap-2.5 min-w-0">
           <span className="bg-emerald-500/15 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded font-bold tracking-wide text-[10px] uppercase flex items-center gap-1.5 shrink-0">

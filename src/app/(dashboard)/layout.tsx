@@ -56,16 +56,18 @@ export default async function DashboardLayout({
 
       {/* Main Container */}
       <div className="lg:pl-64 flex flex-col min-h-screen w-full min-w-0">
-        {isUatEnvironment && <UATReviewBanner user={authUser} />}
-        {/* Top Header */}
-        <Header
-          userName={userName}
-          userRole={userRole}
-          activeEntity="ICON_TECH_PRO"
-        />
+        {/* Sticky Top Header Stack (UAT Review Banner + Navigation Header) */}
+        <div className="sticky top-0 z-30 flex flex-col w-full shadow-xs">
+          {isUatEnvironment && <UATReviewBanner user={authUser} />}
+          <Header
+            userName={userName}
+            userRole={userRole}
+            activeEntity="ICON_TECH_PRO"
+          />
+        </div>
 
         {/* Corporate MFA Enforcement & Grace Period Banner */}
-        <div className="mt-16 w-full">
+        <div className="w-full">
           <MfaGracePeriodBanner policy={mfaPolicy} />
         </div>
 
