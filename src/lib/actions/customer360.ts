@@ -122,23 +122,32 @@ export async function getCustomer360Data(
     const userRole = authUser?.role || 'Sales Executive';
     const showCommercialCosts = canViewPurchaseCosts(userRole);
 
-    const term = (customerIdOrCode || '').trim();
-    if (!term) {
+    const raw = (customerIdOrCode || '').trim();
+    if (!raw) {
       return { success: false, error: 'Customer identifier is required' };
     }
+    const term = decodeURIComponent(raw);
 
     // Direct lookup by ID or Code first
     let customer = await getCustomerById(term);
+    if (!customer && raw !== term) {
+      customer = await getCustomerById(raw);
+    }
 
     // Fallback search in customer directory
     if (!customer) {
       const custRes = await getCustomers({ search: term });
+      const lower = term.toLowerCase();
       customer =
         custRes.customers.find(
           (c) =>
             c.id === term ||
-            c.customer_code.toLowerCase() === term.toLowerCase() ||
-            c.customer_name.toLowerCase() === term.toLowerCase()
+            c.id === raw ||
+            c.customer_code.toLowerCase() === lower ||
+            c.customer_name.toLowerCase() === lower ||
+            (c.company_name && c.company_name.toLowerCase() === lower) ||
+            c.customer_name.toLowerCase().includes(lower) ||
+            (c.company_name && c.company_name.toLowerCase().includes(lower))
         ) || (custRes.customers.length > 0 ? custRes.customers[0] : null);
     }
 
@@ -158,7 +167,7 @@ export async function getCustomer360Data(
       return false;
     };
 
-    // Load all related domain entities concurrently
+    // Load all related domain entities concurrently with resilient error isolation
     const [
       enqRes,
       visitsRes,
@@ -181,26 +190,26 @@ export async function getCustomer360Data(
       archiveDocs,
       projectsRes,
     ] = await Promise.all([
-      getEnquiries({ customer_id: custId, search: customer.customer_name }),
-      getSiteVisits(),
-      getQuotations({ customer_id: custId, search: customer.customer_name }),
-      getOrders({ customer_id: custId, search: customer.customer_name }),
-      getInvoices({ customer_id: custId, search: customer.customer_name }),
-      getPayments(),
-      getInstallations(),
-      getSerialRecords(),
-      getServiceTickets(),
-      getAMCContracts(),
-      getOutboxMessages(),
-      getPurchaseOrders(),
-      getTasks(),
-      getApprovalRequests(),
-      getTallySyncQueue(),
-      getCreditNotes(),
-      getCustomerReceivablesLedger(customer.id),
-      getCustomerOpportunities(customer.id),
-      getCustomerArchiveDocuments(customer.id, customer.customer_name),
-      getProjects({ customer_id: custId }),
+      getEnquiries({ customer_id: custId, search: customer.customer_name }).catch(() => ({ enquiries: [], total: 0 })),
+      getSiteVisits().catch(() => []),
+      getQuotations({ customer_id: custId, search: customer.customer_name }).catch(() => ({ quotations: [], total: 0 })),
+      getOrders({ customer_id: custId, search: customer.customer_name }).catch(() => ({ orders: [], total: 0 })),
+      getInvoices({ customer_id: custId, search: customer.customer_name }).catch(() => ({ invoices: [], total: 0 })),
+      getPayments().catch(() => ({ payments: [], total: 0 })),
+      getInstallations().catch(() => []),
+      getSerialRecords().catch(() => ({ records: [], total: 0 })),
+      getServiceTickets().catch(() => []),
+      getAMCContracts().catch(() => []),
+      getOutboxMessages().catch(() => ({ messages: [], total: 0 })),
+      getPurchaseOrders().catch(() => []),
+      getTasks().catch(() => ({ tasks: [], total: 0 })),
+      getApprovalRequests().catch(() => ({ requests: [], total: 0 })),
+      getTallySyncQueue().catch(() => ({ queue: [], total: 0 })),
+      getCreditNotes().catch(() => []),
+      getCustomerReceivablesLedger(customer.id).catch(() => ({ success: false, data: [] })),
+      getCustomerOpportunities(customer.id).catch(() => ({ success: false, data: [] })),
+      getCustomerArchiveDocuments(customer.id, customer.customer_name).catch(() => []),
+      getProjects({ customer_id: custId }).catch(() => ({ projects: [], total: 0 })),
     ]);
 
     const creditNotes = (cnRes || []).filter((cn) => matchesCust(cn.customer_id, cn.customer_name));
