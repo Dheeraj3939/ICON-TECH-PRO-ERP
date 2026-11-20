@@ -453,34 +453,31 @@ export async function getCustomer360Data(
     let overdueInvoicesCount = 0;
     const now = new Date();
 
-    invoices.forEach((inv) => {
-      totalInvoiced += inv.grand_total || 0;
-      totalCollected += inv.paid_amount || 0;
-      const bal = inv.balance_amount || 0;
-      balanceDue += bal;
-      if (bal > 0 && inv.due_date && new Date(inv.due_date) < now) {
-        overdueInvoicesCount++;
-      }
-    });
+    if (invoices.length > 0) {
+      invoices.forEach((inv) => {
+        totalInvoiced += inv.grand_total || 0;
+        totalCollected += inv.paid_amount || 0;
+        const bal = inv.balance_amount || 0;
+        balanceDue += bal;
+        if (bal > 0 && inv.due_date && new Date(inv.due_date) < now) {
+          overdueInvoicesCount++;
+        }
+      });
+    } else {
+      // Historical fallback if invoices are not yet synced to ERP table
+      const tallyPayments = tallyReconciliationsList
+        .filter((r) => r.entity_type === 'PAYMENT' || r.notes?.toLowerCase().includes('receipt'))
+        .reduce((sum, r) => sum + (Number(r.tally_amount) || 0), 0);
 
-    // Incorporate Tally historical sales & collections
-    const tallyPayments = tallyReconciliationsList
-      .filter((r) => r.entity_type === 'PAYMENT' || r.notes?.toLowerCase().includes('receipt'))
-      .reduce((sum, r) => sum + (Number(r.tally_amount) || 0), 0);
+      const tallySales = tallyReconciliationsList
+        .filter((r) => r.entity_type === 'INVOICE' || r.notes?.toLowerCase().includes('icon'))
+        .reduce((sum, r) => sum + (Number(r.tally_amount) || 0), 0);
 
-    const tallySales = tallyReconciliationsList
-      .filter((r) => r.entity_type === 'INVOICE' || r.notes?.toLowerCase().includes('icon'))
-      .reduce((sum, r) => sum + (Number(r.tally_amount) || 0), 0);
-
-    if (tallySales > totalInvoiced) {
       totalInvoiced = tallySales;
-    }
-
-    const totalReceipts = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + tallyPayments;
-    if (totalReceipts > totalCollected) {
+      const totalReceipts = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + tallyPayments;
       totalCollected = totalReceipts;
+      balanceDue = Math.max(0, totalInvoiced - totalCollected);
     }
-    balanceDue = Math.max(0, totalInvoiced - totalCollected);
 
     const creditLimit = customer.credit_limit || 0;
     const creditUtilizationPct = creditLimit > 0 ? Math.min(100, Math.round((balanceDue / creditLimit) * 100)) : 0;
@@ -739,8 +736,8 @@ export async function getCustomer360Data(
       healthMetrics: {
         healthStatus,
         lifetimeValue: Number(totalInvoiced.toFixed(2)),
-        ordersCount: orders.length,
-        activeAssetsCount: serials.length,
+        ordersCount: orders.length > 0 ? orders.length : invoices.length,
+        activeAssetsCount: serials.length > 0 ? serials.length : invoices.reduce((sum, inv) => sum + (inv.items?.length || 0), 0),
         activeAMCCount: amcContracts.filter((a) => a.is_active).length,
         openTicketsCount: tickets.filter((t) => t.status !== 'Resolved' && t.status !== 'Closed').length,
       },

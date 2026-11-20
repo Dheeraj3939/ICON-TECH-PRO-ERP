@@ -37,10 +37,18 @@ import {
   Filter,
   FileCheck,
   Printer,
+  ChevronDown,
+  ChevronUp,
+  PackageCheck,
+  PhoneCall,
+  User,
+  Tag,
 } from 'lucide-react';
 import { UploadSignedDocumentModal } from '@/components/modals/UploadSignedDocumentModal';
+import { PrintInvoiceModal } from '@/components/modals/PrintInvoiceModal';
 import type { Customer360Dossier } from '@/lib/actions/customer360';
 import type { BusinessDocumentType, CustomerArchiveDocument } from '@/types/documents';
+import type { Invoice } from '@/types/erp';
 
 interface Customer360ViewProps {
   dossier: Customer360Dossier;
@@ -97,6 +105,38 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
     related_transaction_number?: string;
     original_generated_pdf_url?: string;
   } | undefined>(undefined);
+
+  const [selectedPrintInvoice, setSelectedPrintInvoice] = useState<Invoice | null>(null);
+  const [expandedInvoiceIds, setExpandedInvoiceIds] = useState<Record<string, boolean>>({});
+
+  const toggleInvoiceExpand = (invId: string) => {
+    setExpandedInvoiceIds((prev) => ({
+      ...prev,
+      [invId]: !prev[invId],
+    }));
+  };
+
+  const purchasedItems = React.useMemo(() => {
+    return invoices.flatMap((inv) =>
+      (inv.items || []).map((it, idx) => ({
+        id: it.id || `${inv.id}-${idx}`,
+        product_name: it.product_name || it.item_name || it.description || 'Enterprise Solution Equipment',
+        description: it.description || it.product_name || 'Enterprise AV/IT Equipment',
+        hsn_code: it.hsn_code || '85286900',
+        quantity: it.quantity || 1,
+        unit: it.unit || 'Nos.',
+        rate: it.rate || 0,
+        gst_rate: it.gst_rate || 18,
+        gst_amount: it.gst_amount || 0,
+        total_amount: it.total_amount || 0,
+        invoice_number: inv.invoice_number,
+        invoice_id: inv.id,
+        invoice_date: inv.invoice_date,
+        invoice_status: inv.status,
+        invoice_obj: inv,
+      }))
+    );
+  }, [invoices]);
 
   const isGovernment = customer.customer_type === 'GOVERNMENT';
   const isCompany = customer.customer_type === 'COMPANY';
@@ -194,38 +234,73 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
                 )}
               </div>
 
-              <div className="flex items-center gap-4 text-xs text-slate-500 mt-2 flex-wrap">
+              <div className="flex items-center gap-3 text-xs text-slate-500 mt-2.5 flex-wrap">
                 {customer.company_name && (
-                  <span className="flex items-center gap-1 font-medium text-slate-700">
-                    <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="flex items-center gap-1 font-bold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg">
+                    <Building2 className="w-3.5 h-3.5 text-brand-600" />
                     {customer.company_name}
+                  </span>
+                )}
+                {customer.contact_person && (
+                  <span className="flex items-center gap-1 font-semibold text-slate-800 bg-blue-50 text-blue-800 border border-blue-200 px-2.5 py-1 rounded-lg">
+                    <User className="w-3.5 h-3.5 text-blue-600" />
+                    {customer.contact_person}
+                    {customer.designation && (
+                      <span className="text-blue-500 font-normal">({customer.designation})</span>
+                    )}
                   </span>
                 )}
                 {customer.phone && (
                   <a
                     href={`tel:${customer.phone}`}
-                    className="flex items-center gap-1 hover:text-brand-600 transition"
+                    className="flex items-center gap-1 bg-slate-50 hover:bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg border border-slate-200 transition font-medium"
+                    title="Call Primary Phone"
                   >
                     <Phone className="w-3.5 h-3.5 text-slate-400" />
                     {customer.phone}
                   </a>
                 )}
+                {customer.alternate_phone && (
+                  <a
+                    href={`tel:${customer.alternate_phone}`}
+                    className="flex items-center gap-1 bg-slate-50 hover:bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg border border-slate-200 transition font-medium"
+                    title="Call Alternate Phone"
+                  >
+                    <PhoneCall className="w-3.5 h-3.5 text-slate-400" />
+                    {customer.alternate_phone}
+                  </a>
+                )}
                 {customer.email && (
                   <a
                     href={`mailto:${customer.email}`}
-                    className="flex items-center gap-1 hover:text-brand-600 transition"
+                    className="flex items-center gap-1 bg-slate-50 hover:bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg border border-slate-200 transition font-medium"
                   >
                     <Mail className="w-3.5 h-3.5 text-slate-400" />
                     {customer.email}
                   </a>
                 )}
-                <span className="flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                  {customer.city || 'Hyderabad'}, {customer.state || 'Telangana'}
+                <span className="flex items-center gap-1 text-slate-600 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>
+                    {customer.billing_address ? `${customer.billing_address}, ` : ''}
+                    {customer.city || 'Hyderabad'}, {customer.state || 'Telangana'}
+                    {customer.pincode ? ` - ${customer.pincode}` : ''}
+                  </span>
                 </span>
                 {customer.gstin && (
-                  <span className="font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-600">
+                  <span className="font-mono bg-emerald-50 text-emerald-800 border border-emerald-300 px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                     GSTIN: {customer.gstin}
+                  </span>
+                )}
+                {customer.pan && (
+                  <span className="font-mono bg-purple-50 text-purple-800 border border-purple-300 px-2.5 py-1 rounded-lg text-xs font-bold">
+                    PAN: {customer.pan}
+                  </span>
+                )}
+                {Number(customer.credit_limit || 0) > 0 && (
+                  <span className="font-mono bg-amber-50 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-lg text-xs font-bold">
+                    Credit Limit: ₹{Number(customer.credit_limit).toLocaleString('en-IN')}
                   </span>
                 )}
                 {isGovernment && (customer.tender_reference || customer.gem_order_number) && (
@@ -483,6 +558,86 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Purchased Equipment & Solutions (What Customer Bought) */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <PackageCheck className="w-4 h-4 text-brand-600" />
+                    Purchased Equipment & Solutions (What Customer Bought)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Hardware, equipment & solutions purchased across {invoices.length} tax invoice(s)
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold px-2.5 py-1 bg-brand-50 text-brand-700 border border-brand-200 rounded-lg">
+                    {purchasedItems.length} Products & Equipment
+                  </span>
+                  <button
+                    onClick={() => setActiveTab('INVOICES')}
+                    className="text-xs font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1"
+                  >
+                    All Invoices ({invoices.length}) <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+
+              {purchasedItems.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                      <tr>
+                        <th className="py-2.5 px-3">Equipment / Product Description</th>
+                        <th className="py-2.5 px-3">HSN Code</th>
+                        <th className="py-2.5 px-3 text-center">Qty</th>
+                        <th className="py-2.5 px-3 text-right">Unit Rate</th>
+                        <th className="py-2.5 px-3 text-right">Total Amount</th>
+                        <th className="py-2.5 px-3 text-right">Invoice Ref</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {purchasedItems.map((item, idx) => (
+                        <tr key={item.id || idx} className="hover:bg-slate-50/80 transition">
+                          <td className="py-3 px-3">
+                            <span className="font-bold text-slate-900 block">{item.description}</span>
+                            <span className="text-[11px] text-slate-400 font-mono">
+                              GST: {item.gst_rate}% (₹{item.gst_amount ? Number(item.gst_amount).toLocaleString('en-IN') : '0'})
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 font-mono text-slate-600 font-semibold">{item.hsn_code}</td>
+                          <td className="py-3 px-3 text-center font-bold text-slate-800">
+                            {item.quantity} {item.unit}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-700">
+                            ₹{Number(item.rate).toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-3 px-3 text-right font-black text-slate-900">
+                            ₹{Number(item.total_amount).toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-3 px-3 text-right whitespace-nowrap">
+                            <button
+                              onClick={() => setSelectedPrintInvoice(item.invoice_obj || null)}
+                              className="font-mono text-brand-600 hover:text-brand-800 hover:underline font-bold inline-flex items-center gap-1"
+                              title="Click to view tax invoice"
+                            >
+                              <span>{item.invoice_number}</span>
+                              <Printer className="w-3 h-3 text-slate-400 hover:text-brand-600" />
+                            </button>
+                            <span className="block text-[10px] text-slate-400">{item.invoice_date}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 py-6 text-center">
+                  No purchased products recorded for this customer yet.
+                </p>
+              )}
             </div>
 
             {/* Recent Orders Preview */}
@@ -1060,51 +1215,102 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
             </h3>
             {invoices.length > 0 ? (
               <div className="divide-y divide-slate-100">
-                {invoices.map((inv) => (
-                  <div key={inv.id} className="py-3 flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/dashboard/invoices?search=${encodeURIComponent(inv.invoice_number)}&open=${encodeURIComponent(inv.invoice_number)}`}
-                          className="font-mono font-bold text-xs text-brand-700 hover:text-brand-900 hover:underline flex items-center gap-1.5"
-                          title="Open Tax Invoice in ERP"
-                        >
-                          <span>{inv.invoice_number}</span>
-                          <Printer className="w-3 h-3 text-slate-400 hover:text-brand-600" />
-                        </Link>
-                        <span
-                          className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                            inv.status === 'Paid'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-rose-50 text-rose-700 border border-rose-200'
-                          }`}
-                        >
-                          {inv.status}
-                        </span>
+                {invoices.map((inv) => {
+                  const isExpanded = Boolean(expandedInvoiceIds[inv.id]);
+                  const items = inv.items || [];
+                  return (
+                    <div key={inv.id} className="py-3.5">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setSelectedPrintInvoice(inv)}
+                              className="font-mono font-bold text-xs text-brand-700 hover:text-brand-900 hover:underline flex items-center gap-1.5"
+                              title="Click to view/print GST Tax Invoice"
+                            >
+                              <span>{inv.invoice_number}</span>
+                              <Printer className="w-3.5 h-3.5 text-slate-400 hover:text-brand-600" />
+                            </button>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                                inv.status === 'Paid'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              }`}
+                            >
+                              {inv.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Date: {inv.invoice_date} • Due: {inv.due_date || 'Immediate'} • {items.length} Product Line Item(s)
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <span className="text-sm font-black text-slate-900 block">
+                              ₹{inv.grand_total.toLocaleString('en-IN')}
+                            </span>
+                            <span className="text-xs font-semibold text-rose-600 block">
+                              Bal: ₹{inv.balance_amount.toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                          {items.length > 0 && (
+                            <button
+                              onClick={() => toggleInvoiceExpand(inv.id)}
+                              className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold flex items-center gap-1 transition"
+                              title="Toggle line items"
+                            >
+                              <span>{isExpanded ? 'Hide' : 'Products'} ({items.length})</span>
+                              {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setSelectedPrintInvoice(inv)}
+                            className="p-1.5 rounded-lg border border-slate-200 hover:bg-brand-50 hover:text-brand-700 hover:border-brand-300 text-slate-500 transition"
+                            title="Preview / Print GST Tax Invoice"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Date: {inv.invoice_date} • Due: {inv.due_date || 'Immediate'}
-                      </p>
+
+                      {/* Expandable Line Items Table */}
+                      {isExpanded && items.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-slate-100 bg-slate-50/70 rounded-xl p-3">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2 block">
+                            Billed Products & AV/IT Equipment in {inv.invoice_number}
+                          </span>
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="text-slate-400 font-bold border-b border-slate-200/60 pb-1">
+                                <th className="pb-1.5 font-semibold">Item Description</th>
+                                <th className="pb-1.5 font-semibold">HSN</th>
+                                <th className="pb-1.5 text-center font-semibold">Qty</th>
+                                <th className="pb-1.5 text-right font-semibold">Rate (₹)</th>
+                                <th className="pb-1.5 text-right font-semibold">GST</th>
+                                <th className="pb-1.5 text-right font-semibold">Total (₹)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200/40">
+                              {items.map((it, idx) => (
+                                <tr key={it.id || idx}>
+                                  <td className="py-1.5 pr-2 font-medium text-slate-800">
+                                    {it.description || it.product_name}
+                                  </td>
+                                  <td className="py-1.5 font-mono text-slate-500">{it.hsn_code || '85286900'}</td>
+                                  <td className="py-1.5 text-center text-slate-700 font-semibold">{it.quantity} {it.unit || 'Nos.'}</td>
+                                  <td className="py-1.5 text-right font-mono text-slate-700">₹{Number(it.rate).toLocaleString('en-IN')}</td>
+                                  <td className="py-1.5 text-right font-mono text-slate-500">{it.gst_rate}%</td>
+                                  <td className="py-1.5 text-right font-bold text-slate-900">₹{Number(it.total_amount).toLocaleString('en-IN')}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <span className="text-sm font-black text-slate-900 block">
-                          ₹{inv.grand_total.toLocaleString('en-IN')}
-                        </span>
-                        <span className="text-xs font-semibold text-rose-600">
-                          Bal: ₹{inv.balance_amount.toLocaleString('en-IN')}
-                        </span>
-                      </div>
-                      <Link
-                        href={`/dashboard/invoices?search=${encodeURIComponent(inv.invoice_number)}&open=${encodeURIComponent(inv.invoice_number)}`}
-                        className="p-1.5 rounded-lg border border-slate-200 hover:bg-brand-50 hover:text-brand-700 hover:border-brand-300 text-slate-500 transition"
-                        title="Print / View Invoice"
-                      >
-                        <Printer className="w-4 h-4" />
-                      </Link>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="text-xs text-slate-400 py-3 text-center">
@@ -1164,6 +1370,70 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
       {/* Tab 5: ASSETS & SERIALS */}
       {activeTab === 'ASSETS' && (
         <div className="space-y-6">
+          {/* Purchased AV/IT Equipment & Client Assets */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Boxes className="w-4 h-4 text-brand-600" />
+                Purchased AV/IT Equipment & Client Assets ({purchasedItems.length})
+              </h3>
+              <span className="text-xs text-slate-400 font-normal">
+                Synced from confirmed client tax invoices
+              </span>
+            </div>
+
+            {purchasedItems.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3">Equipment / Product Description</th>
+                      <th className="py-2.5 px-3">HSN Code</th>
+                      <th className="py-2.5 px-3 text-center">Billed Qty</th>
+                      <th className="py-2.5 px-3 text-right">Unit Rate</th>
+                      <th className="py-2.5 px-3 text-right">Value (₹)</th>
+                      <th className="py-2.5 px-3 text-right">Invoice Ref</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {purchasedItems.map((item, idx) => (
+                      <tr key={item.id || idx} className="hover:bg-slate-50/80 transition">
+                        <td className="py-2.5 px-3">
+                          <span className="font-bold text-slate-900 block">{item.description}</span>
+                          <span className="text-[11px] text-slate-400">
+                            GST: {item.gst_rate}% (₹{item.gst_amount ? Number(item.gst_amount).toLocaleString('en-IN') : '0'})
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-600 font-semibold">{item.hsn_code}</td>
+                        <td className="py-2.5 px-3 text-center font-bold text-slate-800">
+                          {item.quantity} {item.unit}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-slate-700">
+                          ₹{Number(item.rate).toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-black text-slate-900">
+                          ₹{Number(item.total_amount).toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => setSelectedPrintInvoice(item.invoice_obj || null)}
+                            className="font-mono text-brand-600 hover:text-brand-800 hover:underline font-bold inline-flex items-center gap-1"
+                            title="Click to view tax invoice"
+                          >
+                            <span>{item.invoice_number}</span>
+                            <Printer className="w-3 h-3 text-slate-400 hover:text-brand-600" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 py-4 text-center">No purchased equipment recorded for this account</p>
+            )}
+          </div>
+
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
               <Boxes className="w-4 h-4 text-brand-600" />
@@ -1961,6 +2231,13 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
         onSuccess={() => {
           setIsUploadModalOpen(false);
         }}
+      />
+
+      {/* Modal: Print / View Tax Invoice */}
+      <PrintInvoiceModal
+        invoice={selectedPrintInvoice}
+        isOpen={Boolean(selectedPrintInvoice)}
+        onClose={() => setSelectedPrintInvoice(null)}
       />
 
 

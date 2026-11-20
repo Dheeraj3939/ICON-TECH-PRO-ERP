@@ -778,6 +778,9 @@ export interface GoodsReceiptNote {
 }
 
 export interface InvoiceItem {
+  id?: string;
+  product_name?: string;
+  item_name?: string;
   description: string;
   hsn_code: string;
   quantity: number;
