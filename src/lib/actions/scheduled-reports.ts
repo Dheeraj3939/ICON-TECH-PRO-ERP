@@ -417,7 +417,8 @@ export async function buildRoleRestrictedReportData(
   let allPurchases: any[] = [];
   let allEnquiries: any[] = [];
 
-  if (await isSupabaseAvailable()) {
+  const isDbOnline = await isSupabaseAvailable();
+  if (isDbOnline) {
     try {
       const admin = createAdminClient();
       const [q, o, i, p, po, e] = await Promise.all([
@@ -439,7 +440,7 @@ export async function buildRoleRestrictedReportData(
     }
   }
 
-  if (allQuotations.length === 0) {
+  if (!isDbOnline && allQuotations.length === 0) {
     const erp = await import('@/lib/constants/erp-data');
     allQuotations = [...erp.INITIAL_QUOTATIONS];
     allOrders = [...erp.INITIAL_ORDERS];
@@ -500,9 +501,12 @@ export async function buildRoleRestrictedReportData(
   let rawInvoices = (allInvoices || []).filter((i: any) => inPeriod(i.invoice_date || i.created_at));
   let rawPayments = (allPayments || []).filter((p: any) => inPeriod(p.payment_date || p.created_at));
 
-  const totalInvoiced = rawInvoices.reduce((sum: number, i: any) => sum + (i.grand_total || 0), 0);
-  const totalCollected = rawPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
-  const totalReceivables = rawInvoices.reduce((sum: number, i: any) => sum + (i.balance_amount || (i.grand_total - (i.amount_paid || 0)) || 0), 0);
+  const displayInvoices = rawInvoices.length > 0 ? rawInvoices : (allInvoices || []);
+  const displayPayments = rawPayments.length > 0 ? rawPayments : (allPayments || []);
+
+  const totalInvoiced = displayInvoices.reduce((sum: number, i: any) => sum + (i.grand_total || 0), 0);
+  const totalCollected = displayPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+  const totalReceivables = displayInvoices.reduce((sum: number, i: any) => sum + (i.balance_amount || (i.grand_total - (i.amount_paid || 0)) || 0), 0);
 
   let totalSupplierSpend: number | undefined;
   let grossMarginPct: number | undefined;
@@ -626,7 +630,7 @@ export async function buildRoleRestrictedReportData(
       status: o.status || 'CONFIRMED',
       salesperson: o.salesperson_name || 'ICON Sales Team',
     })),
-    invoices: isSalesperson ? undefined : rawInvoices.map((i: any) => ({
+    invoices: isSalesperson ? undefined : displayInvoices.map((i: any) => ({
       number: i.invoice_number || i.number || 'N/A',
       date: i.invoice_date || i.created_at || '',
       customer: i.customer_name || 'Valued Client',
@@ -634,7 +638,7 @@ export async function buildRoleRestrictedReportData(
       balance: Number(i.balance_amount ?? 0),
       status: i.status || 'ISSUED',
     })),
-    collections: isSalesperson ? undefined : rawPayments.map((p: any) => ({
+    collections: isSalesperson ? undefined : displayPayments.map((p: any) => ({
       number: p.payment_number || p.number || 'N/A',
       date: p.payment_date || p.created_at || '',
       customer: p.customer_name || 'Valued Client',

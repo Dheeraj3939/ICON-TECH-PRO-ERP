@@ -127,7 +127,7 @@ export function AddEmployeeModal({
       const res = await onboardEmployee({
         full_name: fullName,
         login_email: loginEmail,
-        corporate_email: corporateEmail || undefined,
+        corporate_email: corporateEmail.trim() || loginEmail.trim(),
         phone,
         department,
         designation,
@@ -286,33 +286,39 @@ export function AddEmployeeModal({
 
         {/* Stepper Progress Tabs */}
         <div className="grid grid-cols-3 gap-2">
-          <div
-            className={`p-2 rounded-xl text-center border text-[11px] font-bold ${
+          <button
+            type="button"
+            onClick={() => setStep(1)}
+            className={`p-2 rounded-xl text-center border text-[11px] font-bold transition cursor-pointer ${
               step === 1
-                ? 'bg-brand-50 border-brand-500 text-brand-700'
-                : 'bg-slate-50 border-slate-200 text-slate-500'
+                ? 'bg-brand-50 border-brand-500 text-brand-700 shadow-xs'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
             }`}
           >
             1. Basic Details
-          </div>
-          <div
-            className={`p-2 rounded-xl text-center border text-[11px] font-bold ${
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep(2)}
+            className={`p-2 rounded-xl text-center border text-[11px] font-bold transition cursor-pointer ${
               step === 2
-                ? 'bg-brand-50 border-brand-500 text-brand-700'
-                : 'bg-slate-50 border-slate-200 text-slate-500'
+                ? 'bg-brand-50 border-brand-500 text-brand-700 shadow-xs'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
             }`}
           >
             2. ERP Role
-          </div>
-          <div
-            className={`p-2 rounded-xl text-center border text-[11px] font-bold ${
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep(3)}
+            className={`p-2 rounded-xl text-center border text-[11px] font-bold transition cursor-pointer ${
               step === 3
-                ? 'bg-brand-50 border-brand-500 text-brand-700'
-                : 'bg-slate-50 border-slate-200 text-slate-500'
+                ? 'bg-brand-50 border-brand-500 text-brand-700 shadow-xs'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
             }`}
           >
             3. Access Levels
-          </div>
+          </button>
         </div>
 
         {error && (
@@ -446,7 +452,7 @@ export function AddEmployeeModal({
               <div className="flex justify-end pt-3 border-t">
                 <button
                   type="button"
-                  disabled={!fullName.trim() || !corporateEmail.trim() || !phone.trim()}
+                  disabled={!fullName.trim() || !loginEmail.trim() || !phone.trim()}
                   onClick={() => setStep(2)}
                   className="inline-flex items-center gap-1.5 px-5 py-2 font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition shadow-xs disabled:opacity-40"
                 >

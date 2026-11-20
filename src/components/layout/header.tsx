@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { logout, quickLoginAsRole } from '@/app/(auth)/login/actions';
 import { switchUATUserSession } from '@/app/uat/actions';
+import { getNotifications } from '@/lib/actions/notifications';
 import {
   LogOut,
   User,
@@ -122,16 +123,56 @@ export function Header({
     }
   };
 
-  const notifications: Array<{
-    id: string;
-    category: string;
-    color: string;
-    icon: any;
-    title: string;
-    desc: string;
-    time: string;
-    href: string;
-  }> = [];
+  const [notifications, setNotifications] = useState<
+    Array<{
+      id: string;
+      category: string;
+      color: string;
+      icon: any;
+      title: string;
+      desc: string;
+      time: string;
+      href: string;
+    }>
+  >([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    getNotifications()
+      .then((notifs) => {
+        if (!isMounted) return;
+        if (notifs && notifs.length > 0) {
+          setNotifications(
+            notifs.map((n) => ({
+              id: n.id,
+              category:
+                n.priority === 'URGENT'
+                  ? 'URGENT'
+                  : n.category === 'FOLLOW_UP' || n.category === 'ACCOUNTS_REVIEW_REQUIRED'
+                  ? 'TODAY'
+                  : 'NEW',
+              color: n.priority === 'URGENT' ? 'bg-rose-500' : 'bg-blue-500',
+              icon: Bell,
+              title: n.title,
+              desc: n.message,
+              time: new Date(n.created_at).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+              href: n.action_url || '/dashboard',
+            }))
+          );
+        } else {
+          setNotifications([]);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setNotifications([]);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const filteredNotifs = notifications.filter((n) => {
     if (notifFilter === 'ALL') return true;

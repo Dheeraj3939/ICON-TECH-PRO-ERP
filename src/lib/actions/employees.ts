@@ -220,11 +220,37 @@ export async function createEmployee(data: {
       const admin = createAdminClient();
       const { data: existingDb } = await admin
         .from('employees')
-        .select('id')
+        .select('*')
         .ilike('corporate_email', data.corporate_email.trim())
         .maybeSingle();
       if (existingDb) {
-        return { success: false, error: 'An employee with this corporate email already exists.' };
+        await admin
+          .from('employees')
+          .update({
+            full_name: data.full_name,
+            phone: data.phone,
+            department: data.department,
+            designation: data.designation,
+            employment_type: data.employment_type,
+            joining_date: data.joining_date,
+            work_location_type: data.work_location_type,
+            notes: data.notes || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingDb.id);
+
+        const updatedEmp: Employee = {
+          ...existingDb,
+          full_name: data.full_name,
+          phone: data.phone,
+          department: data.department,
+          designation: data.designation,
+          employment_type: data.employment_type,
+          joining_date: data.joining_date,
+          work_location_type: data.work_location_type,
+          notes: data.notes || undefined,
+        };
+        return { success: true, employee: updatedEmp };
       }
       const { data: allIds } = await admin.from('employees').select('employee_id');
       if (allIds && allIds.length > 0) {

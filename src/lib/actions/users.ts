@@ -242,65 +242,82 @@ export async function createManagedUser(payload: {
           .maybeSingle();
 
         if (existingProfile) {
-          return {
-            success: false,
-            error: `A user profile with email "${normalizedEmail}" already exists in the database.`,
-          };
-        }
-
-        // Check if user already exists in Supabase Auth
-        const { data: userList } = await admin.auth.admin.listUsers();
-        const existingAuth = userList?.users?.find(
-          (u) => u.email?.toLowerCase() === normalizedEmail
-        );
-
-        let authUserId: string;
-
-        if (existingAuth) {
-          authUserId = existingAuth.id;
-        } else {
-          // Provision in Supabase Auth without exposing passwords to admin
-          const { data: newAuthData, error: createErr } = await admin.auth.admin.createUser({
-            email: normalizedEmail,
-            email_confirm: false,
-            user_metadata: {
+          assignedId = existingProfile.id;
+          const { error: updateErr } = await admin
+            .from('user_profiles')
+            .update({
               full_name: payload.name.trim(),
-              role: payload.role,
-            },
-          });
+              phone: payload.phone?.trim() || null,
+              role_id: roleRow.id,
+              status: 'ACTIVE',
+              can_login: true,
+              department: payload.department?.trim() || null,
+              designation: payload.designation?.trim() || null,
+              notes: payload.notes?.trim() || null,
+            })
+            .eq('id', assignedId);
 
-          if (createErr || !newAuthData?.user) {
+          if (updateErr) {
             return {
               success: false,
-              error: `Failed to provision Supabase Auth user: ${createErr?.message || 'Unknown auth error'}`,
+              error: `Failed to update existing user profile: ${updateErr.message}`,
             };
           }
-          authUserId = newAuthData.user.id;
-        }
+        } else {
+          // Check if user already exists in Supabase Auth
+          const { data: userList } = await admin.auth.admin.listUsers();
+          const existingAuth = userList?.users?.find(
+            (u) => u.email?.toLowerCase() === normalizedEmail
+          );
 
-        assignedId = authUserId;
+          let authUserId: string;
 
-        // Create authoritative user profile record linked to the real Auth UUID
-        const { error: profileErr } = await admin.from('user_profiles').upsert([
-          {
-            id: assignedId,
-            full_name: payload.name.trim(),
-            email: normalizedEmail,
-            phone: payload.phone?.trim() || null,
-            role_id: roleRow.id,
-            status: 'INVITED',
-            can_login: true,
-            department: payload.department?.trim() || null,
-            designation: payload.designation?.trim() || null,
-            notes: payload.notes?.trim() || null,
-          },
-        ], { onConflict: 'id' });
+          if (existingAuth) {
+            authUserId = existingAuth.id;
+          } else {
+            // Provision in Supabase Auth without exposing passwords to admin
+            const { data: newAuthData, error: createErr } = await admin.auth.admin.createUser({
+              email: normalizedEmail,
+              email_confirm: false,
+              user_metadata: {
+                full_name: payload.name.trim(),
+                role: payload.role,
+              },
+            });
 
-        if (profileErr) {
-          return {
-            success: false,
-            error: `Failed to create user profile: ${profileErr.message}`,
-          };
+            if (createErr || !newAuthData?.user) {
+              return {
+                success: false,
+                error: `Failed to provision Supabase Auth user: ${createErr?.message || 'Unknown auth error'}`,
+              };
+            }
+            authUserId = newAuthData.user.id;
+          }
+
+          assignedId = authUserId;
+
+          // Create authoritative user profile record linked to the real Auth UUID
+          const { error: profileErr } = await admin.from('user_profiles').upsert([
+            {
+              id: assignedId,
+              full_name: payload.name.trim(),
+              email: normalizedEmail,
+              phone: payload.phone?.trim() || null,
+              role_id: roleRow.id,
+              status: 'INVITED',
+              can_login: true,
+              department: payload.department?.trim() || null,
+              designation: payload.designation?.trim() || null,
+              notes: payload.notes?.trim() || null,
+            },
+          ], { onConflict: 'id' });
+
+          if (profileErr) {
+            return {
+              success: false,
+              error: `Failed to create user profile: ${profileErr.message}`,
+            };
+          }
         }
       } catch (dbErr: any) {
         console.warn('Supabase createManagedUser failed:', dbErr);
