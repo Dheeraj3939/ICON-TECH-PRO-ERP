@@ -426,21 +426,39 @@ export function AddEmployeeModal({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Reporting Manager (Optional)</label>
-                  <input
-                    type="text"
-                    value={reportingManager}
-                    onChange={(e) => setReportingManager(e.target.value)}
-                    placeholder="e.g. Vineet Babu"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none"
-                  />
+                  <label className="block font-bold text-slate-700 mb-1">
+                    ERP Role *
+                    <span className="text-[10px] text-slate-400 font-normal ml-1">(Access Permission Level)</span>
+                  </label>
+                  <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl outline-none bg-white font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/30 text-xs"
+                  >
+                    {roles.length > 0 ? (
+                      roles.map((r) => (
+                        <option key={r.id} value={r.role_name}>
+                          {r.role_name} {r.is_system ? '(Standard)' : ''}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="Managing Director">Managing Director</option>
+                        <option value="Admin / BDM">Admin / BDM</option>
+                        <option value="BDM">BDM</option>
+                        <option value="Sales Executive">Sales Executive</option>
+                        <option value="Accounts">Accounts</option>
+                        <option value="Office Assistant">Office Assistant</option>
+                      </>
+                    )}
+                  </select>
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Employment Status</label>
                   <select
                     value={employmentStatus}
                     onChange={(e) => setEmploymentStatus(e.target.value as any)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none bg-white font-medium text-slate-800"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none bg-white font-medium text-slate-800 text-xs"
                   >
                     <option value="Active">Active</option>
                     <option value="On Probation">On Probation</option>
@@ -449,15 +467,52 @@ export function AddEmployeeModal({
                 </div>
               </div>
 
-              <div className="flex justify-end pt-3 border-t">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Reporting Manager (Optional)</label>
+                <input
+                  type="text"
+                  value={reportingManager}
+                  onChange={(e) => setReportingManager(e.target.value)}
+                  placeholder="e.g. Vineet Babu"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none"
+                />
+              </div>
+
+              {(!fullName.trim() || !loginEmail.trim() || !phone.trim()) && (
+                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>
+                    Required: <strong>Full Name</strong>, <strong>Mobile Number</strong>, and <strong>ERP Login Email</strong>.
+                  </span>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t">
                 <button
                   type="button"
-                  disabled={!fullName.trim() || !loginEmail.trim() || !phone.trim()}
                   onClick={() => setStep(2)}
-                  className="inline-flex items-center gap-1.5 px-5 py-2 font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-xl transition shadow-xs disabled:opacity-40"
+                  className="text-slate-600 hover:text-slate-900 font-bold text-xs inline-flex items-center gap-1 order-2 sm:order-1"
                 >
-                  <span>Next: ERP Role</span>
+                  <span>Advanced: Role Details &amp; Access Tiers</span>
                   <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !fullName.trim() || !loginEmail.trim() || !phone.trim()}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 font-black text-white bg-blue-600 hover:bg-blue-700 active:scale-95 rounded-xl transition shadow-md disabled:opacity-40 cursor-pointer order-1 sm:order-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Creating Account...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-white" />
+                      <span>Save &amp; Create Employee Now</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

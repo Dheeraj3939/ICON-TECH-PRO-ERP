@@ -24,6 +24,7 @@ import {
   CreditCard,
   ExternalLink,
   Menu,
+  X,
 } from 'lucide-react';
 import type { BusinessEntityCode, UserRoleName } from '@/types/database';
 import { CommandPalette } from '@/components/search/CommandPalette';
@@ -136,6 +137,40 @@ export function Header({
     }>
   >([]);
 
+  const [dismissedIds, setDismissedIds] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('icon_dismissed_notifs');
+        return stored ? JSON.parse(stored) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  const handleDismiss = (id: string) => {
+    setDismissedIds((prev) => {
+      const updated = [...prev, id];
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('icon_dismissed_notifs', JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+  };
+
+  const handleClearAll = () => {
+    const allIds = notifications.map((n) => n.id);
+    setDismissedIds(allIds);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('icon_dismissed_notifs', JSON.stringify(allIds));
+      } catch {}
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
     getNotifications()
@@ -174,7 +209,9 @@ export function Header({
     };
   }, []);
 
-  const filteredNotifs = notifications.filter((n) => {
+  const activeNotifs = notifications.filter((n) => !dismissedIds.includes(n.id));
+
+  const filteredNotifs = activeNotifs.filter((n) => {
     if (notifFilter === 'ALL') return true;
     return n.category === notifFilter;
   });
@@ -297,9 +334,20 @@ export function Header({
                         Work Notifications
                       </span>
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                      {filteredNotifs.length} Updates
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {activeNotifs.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearAll}
+                          className="text-[10px] text-blue-300 hover:text-white underline font-semibold transition cursor-pointer"
+                        >
+                          Clear All
+                        </button>
+                      )}
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                        {activeNotifs.length} Updates
+                      </span>
+                    </div>
                   </div>
 
                   {/* Filter Categories */}
@@ -332,14 +380,16 @@ export function Header({
                       filteredNotifs.map((item) => {
                         const Icon = item.icon;
                         return (
-                          <Link
+                          <div
                             key={item.id}
-                            href={item.href}
-                            onClick={() => setIsNotifOpen(false)}
-                            className="p-3 hover:bg-slate-50 flex items-start gap-3 transition rounded-xl block group"
+                            className="p-3 hover:bg-slate-50 flex items-start gap-3 transition rounded-xl group relative"
                           >
                             <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${item.color}`} />
-                            <div className="min-w-0 flex-1">
+                            <Link
+                              href={item.href}
+                              onClick={() => setIsNotifOpen(false)}
+                              className="min-w-0 flex-1 block"
+                            >
                               <span className="text-xs font-bold text-slate-900 group-hover:text-blue-600 block">
                                 {item.title}
                               </span>
@@ -349,8 +399,20 @@ export function Header({
                               <span className="text-[10px] text-slate-400 mt-1 block">
                                 {item.time}
                               </span>
-                            </div>
-                          </Link>
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDismiss(item.id);
+                              }}
+                              title="Dismiss notification"
+                              className="text-slate-300 hover:text-rose-600 hover:bg-rose-50 p-1 rounded-lg transition shrink-0 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         );
                       })
                     ) : (

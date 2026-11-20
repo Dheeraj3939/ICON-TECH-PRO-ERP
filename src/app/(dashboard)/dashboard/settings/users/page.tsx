@@ -40,6 +40,7 @@ import {
   resendUserInvitation,
 } from '@/lib/actions/users';
 import { getRoles } from '@/lib/actions/permissions';
+import { sendTestExecutiveSummaryEmailToMD } from '@/lib/actions/scheduled-reports';
 import { AddEmployeeModal } from '@/components/admin/AddEmployeeModal';
 import { ManageAccessModal } from '@/components/admin/ManageAccessModal';
 import type { ManagedUser, AppRole, AccountLifecycleStatus } from '@/types/rbac';
@@ -63,6 +64,23 @@ export default function UsersManagementPage() {
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+  const [isSendingMdEmail, setIsSendingMdEmail] = useState(false);
+
+  const handleTriggerMdTestEmail = async () => {
+    setIsSendingMdEmail(true);
+    try {
+      const res = await sendTestExecutiveSummaryEmailToMD();
+      if (res.success) {
+        showMessage('success', res.message);
+      } else {
+        showMessage('error', res.error || res.message);
+      }
+    } catch (err: any) {
+      showMessage('error', err.message || 'Failed to dispatch MD summary email');
+    } finally {
+      setIsSendingMdEmail(false);
+    }
+  };
 
   const [formData, setFormData] = useState({
     name: '',
@@ -257,25 +275,47 @@ export default function UsersManagementPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setFormData({
-              name: '',
-              email: '',
-              phone: '',
-              role: roles[0]?.role_name || 'Sales Executive',
-              department: 'Field Sales',
-              designation: 'Sales Executive',
-              notes: '',
-            });
-            setIsAddModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold rounded-xl shadow-md transition"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>Add New Employee</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handleTriggerMdTestEmail}
+            disabled={isSendingMdEmail}
+            className="flex items-center gap-2 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-sm transition active:scale-95 disabled:opacity-50 cursor-pointer"
+            title="Send real-time Sales, Payments & Collections executive summary email to Managing Director (icontechpro@gmail.com)"
+          >
+            {isSendingMdEmail ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Sending to MD...</span>
+              </>
+            ) : (
+              <>
+                <Send className="w-3.5 h-3.5 text-blue-400" />
+                <span>Send Automated Email to MD</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setFormData({
+                name: '',
+                email: '',
+                phone: '',
+                role: roles[0]?.role_name || 'Sales Executive',
+                department: 'Commercial Sales',
+                designation: 'Sales Executive',
+                notes: '',
+              });
+              setIsAddModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>+ Add New Employee</span>
+          </button>
+        </div>
       </div>
 
       {/* Notification Toast */}

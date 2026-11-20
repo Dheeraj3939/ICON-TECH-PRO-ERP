@@ -22,6 +22,7 @@ import {
   getScheduledReportRuns,
   executeScheduledReportCycle,
   updateAutomatedReportConfig,
+  sendTestExecutiveSummaryEmailToMD,
 } from '@/lib/actions/scheduled-reports';
 import {
   getEmailAutomationRules,
@@ -53,6 +54,26 @@ export default function CentralEmailCenterPage() {
   const [queue, setQueue] = useState<EmailQueueJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [executingCycle, setExecutingCycle] = useState(false);
+  const [sendingMdEmail, setSendingMdEmail] = useState(false);
+  const [emailAlert, setEmailAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleSendTestMdSummary = async () => {
+    setSendingMdEmail(true);
+    setEmailAlert(null);
+    try {
+      const res = await sendTestExecutiveSummaryEmailToMD();
+      if (res.success) {
+        setEmailAlert({ type: 'success', message: res.message });
+        loadAll();
+      } else {
+        setEmailAlert({ type: 'error', message: res.error || res.message });
+      }
+    } catch (err: any) {
+      setEmailAlert({ type: 'error', message: err.message || 'Failed to dispatch MD summary email' });
+    } finally {
+      setSendingMdEmail(false);
+    }
+  };
 
   const loadAll = async () => {
     setLoading(true);
@@ -156,18 +177,64 @@ export default function CentralEmailCenterPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSendTestMdSummary}
+            disabled={sendingMdEmail}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 active:scale-95 rounded-xl shadow-md transition disabled:opacity-50 cursor-pointer"
+          >
+            {sendingMdEmail ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Generating &amp; Sending to MD...</span>
+              </>
+            ) : (
+              <>
+                <Send className="w-3.5 h-3.5" />
+                <span>Send Test Executive Summary Email to MD</span>
+              </>
+            )}
+          </button>
+
           <button
             type="button"
             onClick={loadAll}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl shadow-sm transition active:scale-95 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl shadow-sm transition active:scale-95 disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
       </div>
+
+      {/* MD Summary Dispatch Feedback Banner */}
+      {emailAlert && (
+        <div
+          className={`p-4 rounded-xl border flex items-center justify-between text-xs font-bold transition animate-in fade-in-50 ${
+            emailAlert.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            {emailAlert.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+            )}
+            <span>{emailAlert.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setEmailAlert(null)}
+            className="text-slate-400 hover:text-slate-600 text-xs font-bold px-2 py-1 rounded"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

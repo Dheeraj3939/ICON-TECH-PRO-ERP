@@ -1193,3 +1193,108 @@ export async function updateAutomatedReportConfig(
     return { success: false, error: err.message || 'Failed to update report configuration' };
   }
 }
+
+/**
+ * Dispatches an on-demand test Executive Business & Commercial Summary email to the Managing Director.
+ * Summarizes live sales, invoices, collections, overdue receivables, and dispatches.
+ */
+export async function sendTestExecutiveSummaryEmailToMD(): Promise<{
+  success: boolean;
+  message: string;
+  recipientEmail?: string;
+  reportName?: string;
+  error?: string;
+}> {
+  try {
+    const actor = await requireRole(['Managing Director', 'Admin / BDM']);
+
+    // 1. Resolve MD recipient email
+    let mdEmail = 'icontechpro@gmail.com';
+    let mdName = 'Borra Narsimulu';
+    let mdUserId = 'MD-001';
+
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const { data: mdProfile } = await admin
+          .from('user_profiles')
+          .select('id, full_name, email, roles!inner(role_name)')
+          .eq('roles.role_name', 'Managing Director')
+          .eq('status', 'ACTIVE')
+          .maybeSingle();
+
+        if (mdProfile?.email) {
+          mdEmail = mdProfile.email;
+          mdName = mdProfile.full_name || mdName;
+          mdUserId = mdProfile.id;
+        }
+      } catch {}
+    }
+
+    // 2. Build Daily Period
+    const period = await calculateReportingPeriod('DAILY', new Date());
+
+    // 3. Compile full executive dataset (Quotations, Orders, Invoices, Payments, Overdue, Dispatches)
+    const dataset = await buildRoleRestrictedReportData(period, {
+      role: 'Managing Director',
+      email: mdEmail,
+      userId: mdUserId,
+      salespersonName: mdName,
+    });
+
+    const excelContent = await generateReportExcelContent(dataset);
+    const htmlContent = await generateReportHtmlContent(dataset);
+
+    // 4. Dispatch via EmailService
+    const { EmailService } = await import('@/lib/email/email-service');
+    const sendRes = await EmailService.sendEmail(
+      {
+        to: mdEmail,
+        subject: `[ICON TECH PRO ERP] Executive Business & Daily Commercial Summary — ${period.period_label}`,
+        html: htmlContent,
+        text: `ICON TECH PRO ERP - Executive Business Summary for ${period.period_label}\nRecipient: ${mdName} (Managing Director)\nEmail: ${mdEmail}\n\nSummary includes: Sales pipeline, Invoiced revenue, Total collections, and Overdue receivables ledger.\nPlease see the attached CSV file for detailed line-by-line records.`,
+        attachments: [
+          {
+            filename: `Executive_Business_Summary_${period.start_date}_to_${period.end_date}.csv`,
+            content: Buffer.from(excelContent, 'utf-8').toString('base64'),
+            contentType: 'text/csv',
+          },
+        ],
+        metadata: {
+          entityType: 'REPORT' as any,
+          entityId: `TEST-MD-SUMMARY-${Date.now()}`,
+        },
+      },
+      { id: actor.id, name: actor.name }
+    );
+
+    await logAuditEvent({
+      userName: actor.name,
+      action: 'TEST_MD_EXECUTIVE_EMAIL_DISPATCHED',
+      module: 'EXECUTIVE_REPORTING',
+      details: `Dispatched test Executive Summary email to Managing Director ${mdName} (${mdEmail}). Provider result: ${sendRes.success ? 'SUCCESS' : sendRes.error}`,
+    });
+
+    if (sendRes.success) {
+      return {
+        success: true,
+        message: `Executive Business Summary email successfully sent to Managing Director (${mdEmail})!`,
+        recipientEmail: mdEmail,
+        reportName: 'Daily Commercial & Operational Register',
+      };
+    } else {
+      return {
+        success: false,
+        message: `Email queued or logged: ${sendRes.error || 'Provider response recorded'}`,
+        recipientEmail: mdEmail,
+        error: sendRes.error,
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      message: 'Failed to dispatch executive summary email',
+      error: err.message || 'Unknown error occurred',
+    };
+  }
+}
