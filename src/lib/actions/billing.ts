@@ -103,7 +103,9 @@ export async function getInvoices(filters?: {
         }
       }
 
-      query = query.order('created_at', { ascending: false });
+      query = query
+        .order('invoice_date', { ascending: false })
+        .order('created_at', { ascending: false });
       const { data, error } = await query;
 
       if (!error && data) {
