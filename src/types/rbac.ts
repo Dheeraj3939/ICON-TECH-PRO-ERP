@@ -114,6 +114,11 @@ export interface ManagedUser {
   designation?: string;
   notes?: string;
   has_mailbox_integration?: boolean;
+  can_view_purchase_costs?: boolean;
+  can_view_margins?: boolean;
+  sales_data_scope?: 'OWN_ONLY' | 'ALL_COMPANY';
+  can_approve_discounts?: boolean;
+  can_export_data?: boolean;
   created_at: string;
   updated_at?: string;
   last_login?: string;

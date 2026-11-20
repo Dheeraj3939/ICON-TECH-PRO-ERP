@@ -41,6 +41,7 @@ import {
 } from '@/lib/actions/users';
 import { getRoles } from '@/lib/actions/permissions';
 import { AddEmployeeModal } from '@/components/admin/AddEmployeeModal';
+import { ManageAccessModal } from '@/components/admin/ManageAccessModal';
 import type { ManagedUser, AppRole, AccountLifecycleStatus } from '@/types/rbac';
 
 export default function UsersManagementPage() {
@@ -55,6 +56,8 @@ export default function UsersManagementPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<ManagedUser | null>(null);
+  const [selectedAccessUser, setSelectedAccessUser] = useState<ManagedUser | null>(null);
+  const [isAccessModalOpen, setIsAccessModalOpen] = useState(false);
 
   const [notification, setNotification] = useState<{
     type: 'success' | 'error';
@@ -442,14 +445,19 @@ export default function UsersManagementPage() {
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
 
-                        {/* Review Access */}
-                        <Link
-                          href={`/dashboard/settings/permissions?userId=${user.id}`}
-                          title="Review & Override Permissions"
-                          className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 border border-blue-200 transition inline-flex items-center"
+                        {/* Manage Access Governance Modal */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedAccessUser(user);
+                            setIsAccessModalOpen(true);
+                          }}
+                          title="Manage Access & Permissions"
+                          className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 border border-blue-200 transition inline-flex items-center gap-1 text-[11px] font-bold"
                         >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </Link>
+                          <Shield className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="hidden xl:inline">Access</span>
+                        </button>
 
                         {/* Send / Resend Invitation */}
                         <button
@@ -607,13 +615,18 @@ export default function UsersManagementPage() {
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
-                  <Link
-                    href={`/dashboard/settings/permissions?userId=${user.id}`}
-                    className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 border border-blue-200"
-                    title="Review Permissions"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAccessUser(user);
+                      setIsAccessModalOpen(true);
+                    }}
+                    className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 border border-blue-200 inline-flex items-center gap-1 text-[11px] font-bold"
+                    title="Manage Access & Permissions"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </Link>
+                    <Shield className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Access</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleResendInvitation(user)}
@@ -813,6 +826,20 @@ export default function UsersManagementPage() {
           </div>
         </div>
       )}
+
+      {/* 1-Click Access & Permission Governance Modal */}
+      <ManageAccessModal
+        user={selectedAccessUser}
+        isOpen={isAccessModalOpen}
+        onClose={() => {
+          setIsAccessModalOpen(false);
+          setSelectedAccessUser(null);
+        }}
+        onSuccess={() => {
+          showMessage('success', `Access permissions for ${selectedAccessUser?.name} updated and active across system.`);
+          loadData();
+        }}
+      />
     </div>
   );
 }

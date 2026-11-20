@@ -37,7 +37,7 @@ import {
   HelpCircle,
   FileCheck,
 } from 'lucide-react';
-import { getDashboardMetrics, getAuditLogs } from '@/lib/actions/analytics';
+import { getDashboardMetrics, getAuditLogs, getLiveSalesCockpitMetrics, type LiveSalesCockpitMetrics } from '@/lib/actions/analytics';
 import { getEnquiries } from '@/lib/actions/enquiries';
 import { getQuotations } from '@/lib/actions/quotations';
 import { getOrders } from '@/lib/actions/orders';
@@ -68,6 +68,7 @@ export default function UnifiedOperationsDashboard() {
   const [siteVisitsToday, setSiteVisitsToday] = useState<number>(0);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
+  const [liveSales, setLiveSales] = useState<LiveSalesCockpitMetrics | null>(null);
 
   // Active Role Cockpit (defaults to user's actual role once resolved, null during initial fetch)
   const [activeRoleView, setActiveRoleView] = useState<string | null>(null);
@@ -80,7 +81,7 @@ export default function UnifiedOperationsDashboard() {
 
   const loadData = async () => {
     try {
-      const [m, enqRes, qRes, oRes, invRes, prjRes, taskRes, apprRes, amcRes, visitRes, logs, user] = await Promise.all([
+      const [m, enqRes, qRes, oRes, invRes, prjRes, taskRes, apprRes, amcRes, visitRes, logs, user, liveRes] = await Promise.all([
         getDashboardMetrics(),
         getEnquiries(),
         getQuotations(),
@@ -93,8 +94,10 @@ export default function UnifiedOperationsDashboard() {
         getSiteVisits(),
         getAuditLogs(),
         getCurrentSessionUser(),
+        getLiveSalesCockpitMetrics(),
       ]);
       setMetrics(m);
+      setLiveSales(liveRes);
       setEnquiries(enqRes.enquiries);
       setQuotations(qRes.quotations);
       setOrders(oRes.orders);
@@ -379,6 +382,74 @@ export default function UnifiedOperationsDashboard() {
             </div>
           </div>
 
+          {/* =========================================================================
+              ADMIN LIVE COMMERCIAL PACING & REVENUE PULSE
+             ========================================================================= */}
+          {liveSales && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <BarChart3 className="w-4 h-4 text-purple-600" />
+                  <span>LIVE COMMERCIAL OPERATIONS PACING</span>
+                </h3>
+                <span className="text-[11px] font-bold text-slate-500">
+                  Target: ₹{(liveSales.company.monthlyTarget).toLocaleString('en-IN')} &bull;{' '}
+                  <span className="text-purple-600 font-black">{liveSales.company.targetAchievementPct}% Pacing</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-purple-400 transition">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Billed Revenue (MTD)
+                  </span>
+                  <div className="text-2xl font-black text-slate-900 mt-2">
+                    ₹{liveSales.company.mtdInvoiced.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium mt-2">
+                    Today: ₹{liveSales.company.todayInvoiced.toLocaleString('en-IN')}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-slate-300 transition">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Purchase Costs (COGS)
+                  </span>
+                  <div className="text-2xl font-black text-slate-900 mt-2">
+                    ₹{liveSales.company.totalPurchaseCost.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium mt-2">
+                    OEM Hardware Procurement
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-emerald-400 transition">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Gross Profit Contributed
+                  </span>
+                  <div className="text-2xl font-black text-emerald-700 mt-2">
+                    ₹{liveSales.company.grossProfit.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-emerald-600 font-medium mt-2">
+                    Margin: {liveSales.company.blendedMarginPct}% blended
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-blue-400 transition">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Cash Collections
+                  </span>
+                  <div className="text-2xl font-black text-blue-700 mt-2">
+                    ₹{liveSales.company.totalCollected.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium mt-2">
+                    Outstanding: ₹{liveSales.company.totalReceivables.toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Section: Infrastructure & Telemetry Health */}
           <div className="space-y-3">
             <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
@@ -605,6 +676,235 @@ export default function UnifiedOperationsDashboard() {
               </Link>
             </div>
           </div>
+
+          {/* =========================================================================
+              EXECUTIVE LIVE COMMERCIAL FINANCIAL SNAPSHOT (Fortune 500 Standards)
+             ========================================================================= */}
+          {liveSales && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <BarChart3 className="w-4 h-4 text-emerald-600" />
+                  <span>LIVE COMMERCIAL FINANCIAL SNAPSHOT &bull; MTD RUN-RATE</span>
+                </h3>
+                <span className="text-[11px] font-bold text-slate-500">
+                  Target: ₹{(liveSales.company.monthlyTarget).toLocaleString('en-IN')} &bull;{' '}
+                  <span className="text-emerald-600 font-black">{liveSales.company.targetAchievementPct}% Pacing</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 1. MTD Invoiced Revenue */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-blue-400 transition">
+                  <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <span>Invoiced Revenue (MTD)</span>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px]">
+                      {liveSales.company.targetAchievementPct}% of Target
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 mt-2">
+                    ₹{liveSales.company.mtdInvoiced.toLocaleString('en-IN')}
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-1.5 mt-2.5 overflow-hidden">
+                    <div
+                      className="bg-blue-600 h-1.5 rounded-full"
+                      style={{ width: `${Math.min(100, liveSales.company.targetAchievementPct)}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold mt-1.5">
+                    <span>Today: ₹{liveSales.company.todayInvoiced.toLocaleString('en-IN')}</span>
+                    <span>Target: ₹{(liveSales.company.monthlyTarget).toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+
+                {/* 2. Purchase Costs (COGS) */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-slate-300 transition">
+                  <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <span>Purchase Cost (COGS)</span>
+                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px]">
+                      OEM Hardware Buy
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 mt-2">
+                    ₹{liveSales.company.totalPurchaseCost.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium mt-2">
+                    Lenovo, Epson, Crestron, Kramer, Cisco Equipment
+                  </div>
+                </div>
+
+                {/* 3. Net Gross Profit */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-emerald-400 transition">
+                  <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <span>Gross Profit Contributed</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">
+                      Revenue &minus; COGS
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-emerald-700 mt-2">
+                    ₹{liveSales.company.grossProfit.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-emerald-600 font-medium mt-2">
+                    Net commercial earnings on delivered orders
+                  </div>
+                </div>
+
+                {/* 4. Blended Gross Margin % */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-indigo-400 transition">
+                  <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <span>Blended Gross Margin</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        liveSales.company.blendedMarginPct >= 20
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : liveSales.company.blendedMarginPct >= 14
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      {liveSales.company.blendedMarginPct >= 20 ? 'Optimal (≥20%)' : 'Caution (<20%)'}
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 mt-2 flex items-baseline gap-1.5">
+                    <span>{liveSales.company.blendedMarginPct}%</span>
+                    <span className="text-xs text-slate-500 font-semibold">avg margin</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium mt-2">
+                    Collections: ₹{liveSales.company.totalCollected.toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* =========================================================================
+              LIVE SALES REPRESENTATIVE LEADERBOARD MATRIX (Fortune 500 Standards)
+             ========================================================================= */}
+          {liveSales && liveSales.leaderboard.length > 0 && (
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                    <TrendingUp className="w-4 h-4 text-blue-600" />
+                    <span>SALES EXECUTIVE PERFORMANCE & MARGIN LEADERBOARD</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Live tracking of booked orders, invoiced revenue, purchase costs, gross margins and cash collections.
+                  </p>
+                </div>
+                <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg">
+                  Ranked by Revenue Contribution
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/70">
+                      <th className="py-2.5 px-3">Sales Executive</th>
+                      <th className="py-2.5 px-3 text-right">Booked Orders</th>
+                      <th className="py-2.5 px-3 text-right">Billed Revenue</th>
+                      <th className="py-2.5 px-3 text-right">Purchase Cost (COGS)</th>
+                      <th className="py-2.5 px-3 text-right">Gross Profit</th>
+                      <th className="py-2.5 px-3 text-right">Margin %</th>
+                      <th className="py-2.5 px-3 text-right">Cash Recovered</th>
+                      <th className="py-2.5 px-3">Monthly Target</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {liveSales.leaderboard.map((rep) => (
+                      <tr key={rep.name} className="hover:bg-slate-50/80 transition">
+                        <td className="py-3 px-3">
+                          <div className="font-bold text-slate-900">{rep.name}</div>
+                          <div className="text-[10px] text-slate-400">{rep.role}</div>
+                        </td>
+                        <td className="py-3 px-3 text-right font-semibold text-slate-800">
+                          ₹{rep.bookedOrdersValue.toLocaleString('en-IN')}
+                          <span className="text-[10px] text-slate-400 block font-normal">
+                            {rep.bookedOrdersCount} order(s)
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right font-black text-slate-900">
+                          ₹{rep.billedRevenue.toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-3 text-right text-slate-600">
+                          ₹{rep.purchaseCost.toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-3 text-right font-black text-emerald-700">
+                          ₹{rep.grossProfit.toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[11px] font-black ${
+                              rep.marginPct >= 20
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : rep.marginPct >= 14
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {rep.marginPct}%
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right font-semibold text-emerald-600">
+                          ₹{rep.collectedAmount.toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-3 min-w-[130px]">
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 font-bold mb-1">
+                            <span>{rep.targetAchievementPct}%</span>
+                            <span>₹{(rep.mtdTarget / 100000).toFixed(1)}L</span>
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className="bg-emerald-500 h-1.5 rounded-full"
+                              style={{ width: `${Math.min(100, rep.targetAchievementPct)}%` }}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* =========================================================================
+              COMMERCIAL RISK & MARGIN WARNING ALERTS (<15%)
+             ========================================================================= */}
+          {liveSales && liveSales.marginAlerts.length > 0 && (
+            <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-amber-900">
+                    Commercial Margin Exception Radar ({liveSales.marginAlerts.length} Deals Below 15% Margin)
+                  </h4>
+                </div>
+                <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                  Requires MD Audit
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {liveSales.marginAlerts.map((alert) => (
+                  <div key={alert.id} className="p-3 rounded-xl bg-white border border-amber-200 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-slate-900">{alert.number}</span>
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
+                        {alert.marginPct}% Margin
+                      </span>
+                    </div>
+                    <div className="font-semibold text-slate-800 truncate">{alert.customerName}</div>
+                    <div className="text-[11px] text-slate-500 flex justify-between">
+                      <span>Value: ₹{alert.grandTotal.toLocaleString('en-IN')}</span>
+                      <span>Cost: ₹{alert.totalCost.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400">Rep: {alert.salespersonName}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Section: Today's Business (7 Executive Metrics) */}
           <div className="space-y-3">
@@ -960,6 +1260,127 @@ export default function UnifiedOperationsDashboard() {
             </div>
           </div>
 
+          {/* =========================================================================
+              SALES EXECUTIVE PERSONAL LIVE PERFORMANCE & QUOTA PACING
+             ========================================================================= */}
+          {liveSales && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  <span>MY LIVE SALES PERFORMANCE &bull; MONTHLY QUOTA TRACKER</span>
+                </h3>
+                <span className="text-[11px] font-bold text-slate-500">
+                  Target: ₹{(liveSales.personal.monthlyTarget).toLocaleString('en-IN')} &bull;{' '}
+                  <span className="text-emerald-600 font-black">{liveSales.personal.targetAchievementPct}% Achieved</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 1. My Invoiced Sales */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-emerald-400 transition">
+                  <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <span>My Invoiced Sales (MTD)</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">
+                      {liveSales.personal.targetAchievementPct}% Quota
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 mt-2">
+                    ₹{liveSales.personal.mtdInvoiced.toLocaleString('en-IN')}
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-1.5 mt-2.5 overflow-hidden">
+                    <div
+                      className="bg-emerald-600 h-1.5 rounded-full"
+                      style={{ width: `${Math.min(100, liveSales.personal.targetAchievementPct)}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold mt-1.5">
+                    <span>Orders: {liveSales.personal.totalOrdersBooked}</span>
+                    <span>Target: ₹{(liveSales.personal.monthlyTarget).toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+
+                {/* 2. My Gross Profit Contributed */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-blue-400 transition">
+                  <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <span>Gross Profit Contribution</span>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px]">
+                      Earnings
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-emerald-700 mt-2">
+                    ₹{liveSales.personal.grossProfit.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium mt-2">
+                    Commercial earnings generated for company
+                  </div>
+                </div>
+
+                {/* 3. My Profit Margin % */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-purple-400 transition">
+                  <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <span>Average Profit Margin</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                      Target &ge; 20%
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 mt-2 flex items-baseline gap-1.5">
+                    <span>{liveSales.personal.marginPct}%</span>
+                    <span className="text-xs text-emerald-600 font-bold">healthy margin</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium mt-2">
+                    Across all confirmed proposals
+                  </div>
+                </div>
+
+                {/* 4. Cash Collections Recovered */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-amber-400 transition">
+                  <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <span>Collections Recovered</span>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px]">
+                      Bank Deposited
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 mt-2">
+                    ₹{liveSales.personal.totalCollected.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-amber-600 font-medium mt-2">
+                    Pending Receivables: ₹{liveSales.personal.outstandingReceivables.toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Overdue Collections Action List for Salesperson */}
+          {liveSales && liveSales.personal.overdueInvoices.length > 0 && (
+            <div className="p-4 rounded-2xl bg-rose-50/70 border border-rose-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Phone className="w-4 h-4 text-rose-600" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-rose-900">
+                    Priority Payment Collections Call List (Call Today)
+                  </h4>
+                </div>
+                <span className="text-[10px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full">
+                  Cash Inflow Priority
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {liveSales.personal.overdueInvoices.map((inv) => (
+                  <div key={inv.invoiceNumber} className="p-3 rounded-xl bg-white border border-rose-200 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-slate-900">{inv.invoiceNumber}</span>
+                      <span className="font-bold text-rose-700">₹{inv.balance.toLocaleString('en-IN')} Due</span>
+                    </div>
+                    <div className="font-semibold text-slate-800 truncate">{inv.customerName}</div>
+                    <div className="text-[10px] text-slate-500">Due Date: {inv.dueDate || 'Past Due'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Section: Today (5 Sales Metrics) */}
           <div className="space-y-3">
             <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
@@ -1209,6 +1630,74 @@ export default function UnifiedOperationsDashboard() {
               </Link>
             </div>
           </div>
+
+          {/* =========================================================================
+              ACCOUNTS LIVE FINANCIAL PULSE & GST TAX LIABILITY
+             ========================================================================= */}
+          {liveSales && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <CreditCard className="w-4 h-4 text-purple-600" />
+                  <span>LIVE FINANCIAL PULSE &bull; GST LIABILITY & VENDOR PAYABLES</span>
+                </h3>
+                <span className="text-[11px] font-bold text-slate-500">
+                  Total Billed (MTD): ₹{liveSales.accounts.billedRevenue.toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-purple-400 transition">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Total Output GST (MTD)
+                  </span>
+                  <div className="text-2xl font-black text-purple-700 mt-2">
+                    ₹{liveSales.accounts.gstLiability.totalGst.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-semibold mt-2 flex justify-between">
+                    <span>CGST: ₹{liveSales.accounts.gstLiability.cgst.toLocaleString('en-IN')}</span>
+                    <span>SGST: ₹{liveSales.accounts.gstLiability.sgst.toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-rose-400 transition">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Vendor Payables Due
+                  </span>
+                  <div className="text-2xl font-black text-rose-600 mt-2">
+                    ₹{liveSales.accounts.vendorPayablesDue.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium mt-2">
+                    Distributor & OEM Purchase Invoices
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-emerald-400 transition">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Bank Collections Recovered
+                  </span>
+                  <div className="text-2xl font-black text-emerald-700 mt-2">
+                    ₹{liveSales.company.totalCollected.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-emerald-600 font-medium mt-2">
+                    {liveSales.accounts.clearedPaymentsCount} cleared transaction(s)
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-amber-400 transition">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Total Outstanding Receivables
+                  </span>
+                  <div className="text-2xl font-black text-amber-600 mt-2">
+                    ₹{liveSales.company.totalReceivables.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium mt-2">
+                    {liveSales.accounts.pendingInvoicesCount} unpaid/partially paid invoices
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Section: Today's Work (7 Accounts Metrics) */}
           <div className="space-y-3">

@@ -1328,3 +1328,136 @@ export async function updateEmployeeLoginEmail(
   }
 }
 
+/**
+ * Retrieve a user's current effective access configuration and commercial visibility flags.
+ */
+export async function getUserAccessGovernance(userId: string): Promise<{
+  user: ManagedUser | null;
+  enabledModules: import('@/types/rbac').ERPModule[];
+  commercialPermissions: {
+    canViewPurchaseCosts: boolean;
+    canViewMargins: boolean;
+    salesScope: 'OWN_ONLY' | 'ALL_COMPANY';
+    canApproveDiscounts: boolean;
+    canExportData: boolean;
+  };
+}> {
+  await requireRole(['Managing Director', 'Admin / BDM', 'Admin']);
+  const user = await findManagedUser(userId);
+  if (!user) {
+    return {
+      user: null,
+      enabledModules: [],
+      commercialPermissions: {
+        canViewPurchaseCosts: false,
+        canViewMargins: false,
+        salesScope: 'OWN_ONLY',
+        canApproveDiscounts: false,
+        canExportData: false,
+      },
+    };
+  }
+
+  const { getUserEffectivePermissions } = await import('@/lib/actions/permissions');
+  const perms = await getUserEffectivePermissions(user.id, user.role);
+  const enabledModules = Object.entries(perms)
+    .filter(([_, actMap]) => actMap.view?.allowed)
+    .map(([modName]) => modName as import('@/types/rbac').ERPModule);
+
+  const isExecutive = user.role === 'Managing Director' || user.role === 'Admin' || user.role === 'Admin / BDM';
+
+  return {
+    user,
+    enabledModules,
+    commercialPermissions: {
+      canViewPurchaseCosts: user.can_view_purchase_costs ?? isExecutive,
+      canViewMargins: user.can_view_margins ?? (isExecutive || user.role === 'Sales Executive' || user.role === 'BDM'),
+      salesScope: user.sales_data_scope ?? (isExecutive ? 'ALL_COMPANY' : 'OWN_ONLY'),
+      canApproveDiscounts: user.can_approve_discounts ?? isExecutive,
+      canExportData: user.can_export_data ?? true,
+    },
+  };
+}
+
+/**
+ * Configure and persist an employee's access governance: module toggles & commercial visibility controls.
+ */
+export async function saveUserAccessGovernance(payload: {
+  userId: string;
+  enabledModules: import('@/types/rbac').ERPModule[];
+  commercialPermissions?: {
+    canViewPurchaseCosts?: boolean;
+    canViewMargins?: boolean;
+    salesScope?: 'OWN_ONLY' | 'ALL_COMPANY';
+    canApproveDiscounts?: boolean;
+    canExportData?: boolean;
+  };
+  reason?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const actor = await requireRole(['Managing Director', 'Admin / BDM', 'Admin']);
+    const target = await findManagedUser(payload.userId);
+    if (!target) {
+      return { success: false, error: 'User record not found.' };
+    }
+
+    // 1. Update commercial visibility flags
+    if (payload.commercialPermissions) {
+      target.can_view_purchase_costs = Boolean(payload.commercialPermissions.canViewPurchaseCosts);
+      target.can_view_margins = Boolean(payload.commercialPermissions.canViewMargins);
+      target.sales_data_scope = payload.commercialPermissions.salesScope || 'OWN_ONLY';
+      target.can_approve_discounts = Boolean(payload.commercialPermissions.canApproveDiscounts);
+      target.can_export_data = Boolean(payload.commercialPermissions.canExportData);
+    }
+    target.updated_at = new Date().toISOString();
+
+    // 2. Synchronize module view permissions
+    const { getUserOverrides, setUserPermissionOverride, removeUserPermissionOverride } = await import(
+      '@/lib/actions/permissions'
+    );
+    const { ALL_ERP_MODULES } = await import('@/types/rbac');
+    const existingOverrides = await getUserOverrides(target.id);
+
+    const justification = payload.reason?.trim() || `Configured by ${actor.name} via Access Governance Center`;
+
+    for (const mod of ALL_ERP_MODULES) {
+      const isEnabled = payload.enabledModules.includes(mod);
+      const viewOverride = existingOverrides.find((o) => o.module === mod && o.action === 'view');
+
+      if (isEnabled) {
+        // Module is enabled -> if there was a restriction override, remove it
+        if (viewOverride && !viewOverride.granted) {
+          await removeUserPermissionOverride(viewOverride.id, target.id);
+        }
+      } else {
+        // Module is disabled -> enforce restriction override
+        if (!viewOverride || viewOverride.granted) {
+          await setUserPermissionOverride({
+            userId: target.id,
+            userName: target.name,
+            module: mod,
+            action: 'view',
+            granted: false,
+            reason: justification,
+          });
+        }
+      }
+    }
+
+    await logAuditEvent({
+      userName: actor.name,
+      action: 'ACCESS_GOVERNANCE_CONFIGURED',
+      module: 'USER_MANAGEMENT',
+      details: `Updated granular access permissions and commercial visibility for ${target.name} (${target.email}). Modules enabled: ${payload.enabledModules.length}. Scope: ${target.sales_data_scope || 'OWN_ONLY'}`,
+    });
+
+    revalidatePath('/dashboard/settings/users');
+    revalidatePath('/dashboard/settings/permissions');
+    revalidatePath('/dashboard');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to save access configuration' };
+  }
+}
+
+

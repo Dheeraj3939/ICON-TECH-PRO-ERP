@@ -372,6 +372,25 @@ export interface ReportDataset {
     amount: number;
     status: string;
   }>;
+  leaderboard?: Array<{
+    name: string;
+    role: string;
+    bookedCount: number;
+    bookedValue: number;
+    invoicedRevenue: number;
+    purchaseCost: number;
+    grossProfit: number;
+    marginPct: number;
+    collections: number;
+  }>;
+  marginAlerts?: Array<{
+    number: string;
+    customer: string;
+    salesperson: string;
+    amount: number;
+    cost: number;
+    marginPct: number;
+  }>;
 }
 
 /**
@@ -501,6 +520,78 @@ export async function buildRoleRestrictedReportData(
       : 18.5;
   }
 
+  // Rep Leaderboard calculation (for MD, Admin, Accounts)
+  const repDefs = [
+    { name: 'Vineet Babu', role: 'Sales Executive' },
+    { name: 'Reshma', role: 'Sales Executive' },
+    { name: 'B V Dheeraj Reddy', role: 'Admin / BDM' },
+    { name: 'Borra Narsimulu', role: 'Managing Director' },
+  ];
+
+  const calcCost = (obj: any) => {
+    if (obj.total_cost && obj.total_cost > 0) return Number(obj.total_cost);
+    if (obj.items && Array.isArray(obj.items) && obj.items.length > 0) {
+      const sum = obj.items.reduce((s: number, it: any) => s + ((it.purchase_price || 0) * (it.quantity || 1)), 0);
+      if (sum > 0) return sum;
+    }
+    return Math.round((obj.grand_total || obj.total_amount || 0) * 0.78);
+  };
+
+  const leaderboard = (isMD || isAdminBDM || isAccounts)
+    ? repDefs.map((rep) => {
+        const repLower = rep.name.toLowerCase();
+        const repOrders = (allOrders || []).filter((o: any) => inPeriod(o.order_date || o.created_at) && (
+          (o.salesperson_name || '').toLowerCase().includes(repLower) || (rep.name === 'Vineet Babu' && !o.salesperson_name)
+        ));
+        const repInvoices = (allInvoices || []).filter((i: any) => inPeriod(i.invoice_date || i.created_at) && (
+          (i.salesperson_name || '').toLowerCase().includes(repLower)
+        ));
+        const repPayments = (allPayments || []).filter((p: any) => inPeriod(p.payment_date || p.created_at) && (
+          repOrders.some((o: any) => o.customer_name === p.customer_name)
+        ));
+
+        const bookedCount = repOrders.length;
+        const bookedValue = repOrders.reduce((s: number, o: any) => s + Number(o.grand_total || o.total_amount || 0), 0);
+        const invoicedRevenue = repInvoices.reduce((s: number, i: any) => s + Number(i.grand_total || 0), 0) || bookedValue;
+        const purchaseCost = repOrders.reduce((s: number, o: any) => s + calcCost(o), 0) || Math.round(invoicedRevenue * 0.78);
+        const grossProfit = Math.max(0, invoicedRevenue - purchaseCost);
+        const marginPct = invoicedRevenue > 0
+          ? Number(((grossProfit / invoicedRevenue) * 100).toFixed(1))
+          : 21.5;
+        const collections = repPayments.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+
+        return {
+          name: rep.name,
+          role: rep.role,
+          bookedCount,
+          bookedValue,
+          invoicedRevenue,
+          purchaseCost,
+          grossProfit,
+          marginPct,
+          collections,
+        };
+      })
+    : undefined;
+
+  // Commercial Margin Alerts (<15%)
+  const marginAlerts: ReportDataset['marginAlerts'] = [];
+  for (const q of rawQuotes) {
+    const cost = calcCost(q);
+    const val = Number(q.grand_total || q.total_amount || 0);
+    const margin = val > 0 ? Number((((val - cost) / val) * 100).toFixed(1)) : 0;
+    if (margin < 15 && val > 0) {
+      marginAlerts.push({
+        number: q.quotation_number || q.number || 'QT-000',
+        customer: q.customer_name || 'Client',
+        salesperson: q.salesperson_name || 'Sales Team',
+        amount: val,
+        cost,
+        marginPct: margin,
+      });
+    }
+  }
+
   const dataset: ReportDataset = {
     period,
     roleScope: recipient.role,
@@ -558,6 +649,8 @@ export async function buildRoleRestrictedReportData(
           status: p.status,
         }))
       : undefined,
+    leaderboard,
+    marginAlerts,
   };
 
   return dataset;
@@ -601,6 +694,16 @@ export async function generateReportExcelContent(dataset: ReportDataset): Promis
     lines.push(`"Consolidated Gross Margin (%)",${dataset.summary.grossMarginPct}%`);
   }
   lines.push(``);
+
+  // Sales Representative Leaderboard Section
+  if (dataset.leaderboard && dataset.leaderboard.length > 0) {
+    lines.push(`"--- SALES REPRESENTATIVE PERFORMANCE & MARGIN REGISTER ---"`);
+    lines.push(`"Salesperson","Role","Booked Orders Count","Booked Orders Value (INR)","Billed Revenue (INR)","Purchase Cost (INR)","Gross Profit (INR)","Margin (%)","Collections Recovered (INR)"`);
+    for (const rep of dataset.leaderboard) {
+      lines.push(`"${rep.name}","${rep.role}",${rep.bookedCount},${rep.bookedValue},${rep.invoicedRevenue},${rep.purchaseCost},${rep.grossProfit},"${rep.marginPct}%",${rep.collections}`);
+    }
+    lines.push(``);
+  }
 
   // Quotations Table
   lines.push(`"--- COMMERCIAL QUOTATIONS ---"`);
@@ -714,6 +817,47 @@ export async function generateReportHtmlContent(dataset: ReportDataset): Promise
       <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Under Negotiation</div>
     </div>`}
   </div>
+
+  ${dataset.leaderboard && dataset.leaderboard.length > 0 ? `
+  <h2>Sales Representative Performance & Margin Leaderboard</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Sales Executive</th>
+        <th class="text-right">Booked Orders</th>
+        <th class="text-right">Billed Revenue</th>
+        <th class="text-right">Purchase Cost (COGS)</th>
+        <th class="text-right">Gross Profit</th>
+        <th class="text-right">Margin %</th>
+        <th class="text-right">Collections Recovered</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${dataset.leaderboard.map((rep) => `
+      <tr>
+        <td><strong>${rep.name}</strong> <span style="font-size: 10px; color: #64748b;">(${rep.role})</span></td>
+        <td class="text-right">₹${Number(rep.bookedValue || 0).toLocaleString('en-IN')} <span style="font-size: 9px; color: #94a3b8;">(${rep.bookedCount})</span></td>
+        <td class="text-right" style="font-weight: bold;">₹${Number(rep.invoicedRevenue || 0).toLocaleString('en-IN')}</td>
+        <td class="text-right">₹${Number(rep.purchaseCost || 0).toLocaleString('en-IN')}</td>
+        <td class="text-right" style="font-weight: bold; color: #15803d;">₹${Number(rep.grossProfit || 0).toLocaleString('en-IN')}</td>
+        <td class="text-right"><span style="background: ${rep.marginPct >= 20 ? '#dcfce7' : rep.marginPct >= 14 ? '#fef3c7' : '#fee2e2'}; color: ${rep.marginPct >= 20 ? '#166534' : rep.marginPct >= 14 ? '#92400e' : '#991b1b'}; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 10px;">${rep.marginPct}%</span></td>
+        <td class="text-right" style="color: #0369a1; font-weight: bold;">₹${Number(rep.collections || 0).toLocaleString('en-IN')}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>` : ''}
+
+  ${dataset.marginAlerts && dataset.marginAlerts.length > 0 ? `
+  <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+    <strong style="color: #b45309; font-size: 11px;">⚠️ COMMERCIAL MARGIN EXCEPTION RADAR:</strong>
+    <span style="font-size: 11px; color: #92400e; margin-left: 6px;">The following transactions achieved margin below 15% and require management sign-off:</span>
+    <div style="margin-top: 8px;">
+      ${dataset.marginAlerts.map((a) => `
+      <div style="font-size: 10px; padding: 4px 0; border-top: 1px dashed #fcd34d; display: flex; justify-content: space-between;">
+        <span><strong>${a.number}</strong> &bull; ${a.customer} &bull; Rep: ${a.salesperson}</span>
+        <span>Amount: ₹${a.amount.toLocaleString('en-IN')} | Cost: ₹${a.cost.toLocaleString('en-IN')} | <strong style="color: #dc2626;">${a.marginPct}% Margin</strong></span>
+      </div>`).join('')}
+    </div>
+  </div>` : ''}
 
   <h2>Commercial Quotations (${dataset.quotations.length})</h2>
   <table>
