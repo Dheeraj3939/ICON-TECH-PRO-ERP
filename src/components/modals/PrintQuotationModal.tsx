@@ -611,6 +611,11 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
                     {quotation.company_name}
                   </p>
                 )}
+                {(quotation.customer_gstin || (quotation as any).gstin) && (
+                  <p className="font-bold text-slate-900 text-[11px] mt-0.5">
+                    GSTIN: <span className="font-mono font-black">{quotation.customer_gstin || (quotation as any).gstin}</span>
+                  </p>
+                )}
                 {quotation.phone && (
                   <p className="text-slate-700">
                     Ph: {quotation.phone}
@@ -699,7 +704,8 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         });
-                        const formattedQty = Number(it.quantity || 1).toFixed(3);
+                        const rawQty = Number(it.quantity || 1);
+                        const formattedQty = rawQty % 1 === 0 ? `${rawQty} ${it.unit || 'Nos.'}` : `${rawQty.toFixed(2)} ${it.unit || 'Nos.'}`;
                         const formattedAmount = taxable.toLocaleString('en-IN', {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
@@ -771,7 +777,8 @@ export function PrintQuotationModal({ quotation, isOpen, onClose }: PrintQuotati
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     });
-                    const formattedQty = Number(it.quantity || 1).toFixed(3);
+                    const rawQty = Number(it.quantity || 1);
+                    const formattedQty = rawQty % 1 === 0 ? `${rawQty} ${it.unit || 'Nos.'}` : `${rawQty.toFixed(2)} ${it.unit || 'Nos.'}`;
                     const formattedAmount = taxable.toLocaleString('en-IN', {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,

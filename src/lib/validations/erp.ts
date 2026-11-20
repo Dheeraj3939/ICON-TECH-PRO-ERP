@@ -50,6 +50,7 @@ export const quotationFormSchema = z.object({
   phone: z.string().min(10, 'Phone is required'),
   email: z.string().email().optional().or(z.literal('')),
   address: z.string().optional(),
+  customer_gstin: z.string().optional(),
   salesperson_name: z.string().min(1, 'Salesperson is required'),
   quotation_date: z.string().default(new Date().toISOString().split('T')[0]),
   validity_days: z.coerce.number().min(1).default(15),

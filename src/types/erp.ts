@@ -430,6 +430,7 @@ export interface Quotation {
   phone: string;
   email?: string;
   address?: string;
+  customer_gstin?: string;
   salesperson_name: string;
   quotation_date: string;
   validity_days: number;

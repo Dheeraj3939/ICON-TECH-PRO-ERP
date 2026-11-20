@@ -73,6 +73,7 @@ function parseQuotationRow(q: any): Quotation {
   let cleanNotes = q.notes;
   let qFormat = q.quotation_format || 'STANDARD';
   let pSections = q.project_sections || [];
+  let customerGstin = q.customer_gstin || '';
 
   if (q.notes && typeof q.notes === 'string' && q.notes.startsWith('{')) {
     try {
@@ -83,6 +84,7 @@ function parseQuotationRow(q: any): Quotation {
       if (meta.include_signature !== undefined) inclSig = meta.include_signature;
       if (meta.quotation_format) qFormat = meta.quotation_format;
       if (meta.project_sections) pSections = meta.project_sections;
+      if (meta.customer_gstin) customerGstin = meta.customer_gstin;
       if (meta.custom_notes !== undefined) cleanNotes = meta.custom_notes;
     } catch {}
   }
@@ -95,6 +97,7 @@ function parseQuotationRow(q: any): Quotation {
     include_signature: inclSig,
     quotation_format: qFormat,
     project_sections: pSections,
+    customer_gstin: customerGstin,
     notes: cleanNotes,
     items: Array.isArray(q.items) ? q.items : [],
   } as Quotation;
@@ -356,6 +359,7 @@ export async function createQuotation(
       customer_name: payload.customer_name,
       company_name: payload.company_name,
       customer_type: payload.customer_type,
+      customer_gstin: payload.customer_gstin,
       phone: payload.phone,
       email: payload.email,
       address: payload.address,
@@ -425,6 +429,7 @@ export async function createQuotation(
           custom_notes: payload.notes || '',
           quotation_format: quotation.quotation_format,
           project_sections: quotation.project_sections,
+          customer_gstin: payload.customer_gstin || '',
         });
 
         const { data: dbQuote, error: quoteErr } = await admin
@@ -632,6 +637,7 @@ export async function updateQuotation(
       customer_name: payload.customer_name,
       company_name: payload.company_name,
       customer_type: payload.customer_type,
+      customer_gstin: payload.customer_gstin,
       phone: payload.phone,
       email: payload.email,
       address: payload.address,
@@ -686,6 +692,7 @@ export async function updateQuotation(
           include_signature: updatedQuote.include_signature,
           custom_notes: payload.notes || '',
           revision_number: currentRev,
+          customer_gstin: payload.customer_gstin || '',
         });
 
         const targetDbId = isUuid(existingIdx >= 0 ? store[existingIdx].id : id)

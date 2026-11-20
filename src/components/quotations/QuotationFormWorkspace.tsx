@@ -184,6 +184,9 @@ export function QuotationFormWorkspace({
   const [customerType, setCustomerType] = useState<'COMPANY' | 'INDIVIDUAL' | 'GOVERNMENT'>(
     (editingQuotation?.customer_type || initialCustomer?.customer_type as any) || 'COMPANY'
   );
+  const [customerGstin, setCustomerGstin] = useState<string>(
+    editingQuotation?.customer_gstin || (initialCustomer as any)?.gstin || ''
+  );
   const [phone, setPhone] = useState(
     editingQuotation?.phone || initialCustomer?.phone || ''
   );
@@ -590,11 +593,12 @@ export function QuotationFormWorkspace({
       return editingQuotation.terms_conditions;
     }
     return [
-      'Payment Terms: 100% Advance Payment',
-      'Delivery: Immediately / 2-3 Working Days',
-      'Validity: 7 Days from Quote Date',
-      'Warranty: 1 Year Manufacturer Warranty',
-      'Installation: Inclusive of Installation, Mounting & Testing',
+      'Payment Terms: 100% Advance Payment against Proforma Invoice',
+      'Delivery: 2-3 Working Days from receipt of confirmed Purchase Order',
+      'Validity: 7 Days from Quote Date (Subject to OEM price/tariff revision thereafter)',
+      'Warranty: Comprehensive Manufacturer Onsite Warranty as per OEM standard policy',
+      'Site Readiness: 230V AC power, LAN drops, civil cutouts & staging to be provided by client prior to installation',
+      'Installation: Inclusive of professional mounting, cabling, termination & testing by ICON TECH PRO engineers',
       'Taxes: GST 18% as applicable',
       'TRANSPORTATION AND INSTALLATION CHARGES INCLUSIVE',
     ];
@@ -680,6 +684,7 @@ export function QuotationFormWorkspace({
     setPhone(c.phone);
     setEmail(c.email || '');
     setAddress(c.billing_address || `${c.city || ''}, ${c.state || ''}`.trim());
+    setCustomerGstin(c.gstin || '');
     if (c.gstin) {
       const stateCode = c.gstin.slice(0, 2);
       if (stateCode === '36') {
@@ -915,6 +920,7 @@ export function QuotationFormWorkspace({
     customer_name: customerName || 'Valued Customer',
     company_name: companyName || '',
     customer_type: customerType,
+    customer_gstin: customerGstin,
     phone: phone || '',
     email: email || '',
     address: address || '',
@@ -957,6 +963,7 @@ export function QuotationFormWorkspace({
     customerName,
     companyName,
     customerType,
+    customerGstin,
     phone,
     email,
     address,
@@ -1023,6 +1030,7 @@ export function QuotationFormWorkspace({
         customer_name: customerName.trim(),
         company_name: companyName.trim() || undefined,
         customer_type: customerType,
+        customer_gstin: customerGstin.trim() || undefined,
         phone: phone.trim(),
         email: email.trim() || undefined,
         address: address.trim() || undefined,
@@ -1103,6 +1111,7 @@ export function QuotationFormWorkspace({
         customer_name: customerName.trim(),
         company_name: companyName.trim() || undefined,
         customer_type: customerType,
+        customer_gstin: customerGstin.trim() || undefined,
         phone: phone.trim(),
         email: email.trim() || undefined,
         address: address.trim() || undefined,
@@ -1482,6 +1491,31 @@ export function QuotationFormWorkspace({
                     <option value="INDIVIDUAL">Individual Client</option>
                     <option value="GOVERNMENT">Government / PSU</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Customer GSTIN (Corporate Procurement)
+                  </label>
+                  <input
+                    type="text"
+                    value={customerGstin}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase().trim();
+                      setCustomerGstin(val);
+                      if (val.length >= 2) {
+                        const code = val.slice(0, 2);
+                        if (code === '36') setPlaceOfSupply('36-TELANGANA');
+                        else if (code === '37') setPlaceOfSupply('37-ANDHRA PRADESH');
+                        else if (code === '29') setPlaceOfSupply('29-KARNATAKA');
+                        else if (code === '33') setPlaceOfSupply('33-TAMIL NADU');
+                        else if (code === '27') setPlaceOfSupply('27-MAHARASHTRA');
+                        else if (code === '07') setPlaceOfSupply('07-DELHI');
+                      }
+                    }}
+                    placeholder="e.g. 36AADCS4126R1ZW"
+                    className="w-full mt-1 p-2 bg-white rounded-lg border border-slate-200 font-mono font-bold text-slate-800 uppercase outline-none focus:border-blue-500"
+                  />
                 </div>
               </div>
 
@@ -2389,6 +2423,39 @@ export function QuotationFormWorkspace({
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>+ Add Term</span>
+                </button>
+              </div>
+
+              {/* Quick System Integrator & Commercial Presets */}
+              <div className="flex flex-wrap items-center gap-1.5 pb-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">Presets:</span>
+                <button
+                  type="button"
+                  onClick={() => setCustomTerms((prev) => [...prev, 'Payment: 50% Advance with PO, 40% on delivery of equipment, 10% on installation & handover'])}
+                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 border border-slate-200 transition cursor-pointer"
+                >
+                  + 50-40-10 Milestone
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCustomTerms((prev) => [...prev, 'Payment: 30 Days Credit against approved Corporate Purchase Order'])}
+                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 border border-slate-200 transition cursor-pointer"
+                >
+                  + 30 Days Credit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCustomTerms((prev) => [...prev, 'Site Readiness: 230V AC power, LAN drops, civil cutouts & staging to be provided by client prior to installation'])}
+                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 border border-slate-200 transition cursor-pointer"
+                >
+                  + Turnkey Site Readiness
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCustomTerms((prev) => [...prev, 'Price Validity: Prices are subject to revision in case of OEM tariff changes or major forex fluctuations'])}
+                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 border border-slate-200 transition cursor-pointer"
+                >
+                  + OEM Tariff / Forex Revision
                 </button>
               </div>
 
