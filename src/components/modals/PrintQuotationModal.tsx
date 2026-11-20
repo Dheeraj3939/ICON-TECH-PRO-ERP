@@ -9,7 +9,7 @@ import { SendQuotationEmailModal } from '@/components/modals/SendQuotationEmailM
 import { SendQuotationWhatsAppModal } from '@/components/modals/SendQuotationWhatsAppModal';
 
 // Helper: Convert INR amount to words in Indian Numbering System
-function numberToWordsINR(num: number): string {
+export function numberToWordsINR(num: number): string {
   if (!num || isNaN(num) || num <= 0) return 'Zero Rupees Only.';
   const integerPart = Math.floor(num);
   const decimalPart = Math.round((num - integerPart) * 100);

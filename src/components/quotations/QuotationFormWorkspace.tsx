@@ -39,6 +39,8 @@ import {
   SlidersHorizontal,
   Check,
   X,
+  Zap,
+  MessageSquare,
 } from 'lucide-react';
 import { getCustomers } from '@/lib/actions/customers';
 import { getProducts } from '@/lib/actions/products';
@@ -52,7 +54,7 @@ import {
   FormatDetectionResult,
 } from '@/lib/ai/quotation-format-detector';
 import { CustomerFormModal } from '@/components/customers/customer-form-modal';
-import { PrintQuotationModal } from '@/components/modals/PrintQuotationModal';
+import { PrintQuotationModal, numberToWordsINR } from '@/components/modals/PrintQuotationModal';
 import { SpecIntelligenceLookupModal } from '@/components/modals/SpecIntelligenceLookupModal';
 import { getTechnicalEvaluations } from '@/lib/actions/technical-evaluations';
 import type { TechnicalEvaluation } from '@/types/technical-evaluation';
@@ -217,6 +219,9 @@ export function QuotationFormWorkspace({
   const [pricingMode, setPricingMode] = useState<'EXCLUSIVE' | 'INCLUSIVE'>(
     editingQuotation?.is_gst_inclusive || (editingQuotation as any)?.pricing_mode === 'INCLUSIVE' ? 'INCLUSIVE' : 'EXCLUSIVE'
   );
+
+  // User-Friendly Staff Mode: Express (Simple 3-Step) vs Advanced (Full Turnkey Project)
+  const [isExpressMode, setIsExpressMode] = useState<boolean>(true);
 
   // Products Catalog
   const [catalogProducts, setCatalogProducts] = useState<Product[]>(INITIAL_PRODUCTS);
@@ -772,6 +777,59 @@ export function QuotationFormWorkspace({
     ]);
   };
 
+  // Quick 1-Click Item Add for Staff Express Mode
+  const handleAddQuickItem = (
+    title: string,
+    price: number,
+    hsn: string,
+    brand: string,
+    model: string,
+    unit: string = 'Nos.'
+  ) => {
+    const gstRate = 18;
+    const qty = 1;
+    const total = roundTo2Decimals(price * qty * (1 + gstRate / 100));
+    setItems((prev) => [
+      ...prev,
+      {
+        product_name: title,
+        brand,
+        model,
+        category: 'AV & IT Hardware',
+        sku: `ITP-${(brand || 'GEN').slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`,
+        hsn_sac: hsn,
+        unit,
+        quantity: qty,
+        purchase_price: Math.round(price * 0.8),
+        selling_price: price,
+        discount_pct: 0,
+        discount_amount: 0,
+        gst_rate: gstRate,
+        total_amount: total,
+        is_custom: true,
+      },
+    ]);
+  };
+
+  // Staff Quick WhatsApp Share
+  const handleWhatsAppShare = () => {
+    const rawPhone = (phone || '').replace(/[^0-9]/g, '');
+    if (!rawPhone || rawPhone.length < 10) {
+      setErrorMessage('Please enter or select a customer with a valid 10-digit mobile number to share via WhatsApp.');
+      return;
+    }
+    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    const itemsSummary = items
+      .map(
+        (it, i) =>
+          `${i + 1}. ${it.product_name} x ${Number(it.quantity || 1)} = ₹${Number(it.total_amount || 0).toLocaleString('en-IN')}`
+      )
+      .join('\n');
+    const msg = `Dear ${customerName || 'Customer'},\n\nGreetings from *ICON TECH PRO*!\n\nPlease find your official quotation summary below:\n\n*Quotation #:* ${quotationNumber}\n*Date:* ${quotationDate}\n\n*Equipment / Services:*\n${itemsSummary}\n\n*Estimated Grand Total:* ₹${grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} (GST 18% Included)\n\nWe would be delighted to assist with your requirement. Please let us know if you need any adjustments.\n\nWarm regards,\n*ICON TECH PRO*\nHyderabad | Ph: 8099909997`;
+    const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  };
+
   // Duplicate an item
   const handleDuplicateItem = (idx: number) => {
     const it = items[idx];
@@ -1237,8 +1295,591 @@ export function QuotationFormWorkspace({
         </div>
       )}
 
-      {/* Main Two-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* Mode Switcher Pill Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-white border border-slate-200 rounded-2xl p-2.5 px-4 shadow-xs gap-3">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold text-slate-500 hidden sm:inline">Quotation View:</span>
+          <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setIsExpressMode(true)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition flex items-center gap-1.5 cursor-pointer ${
+                isExpressMode ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>⚡ Express Mode (Fast & Simple)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsExpressMode(false)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition flex items-center gap-1.5 cursor-pointer ${
+                !isExpressMode ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>🛠️ Advanced Project Mode</span>
+            </button>
+          </div>
+        </div>
+        <span className="text-[11px] text-slate-500 font-medium">
+          {isExpressMode
+            ? '⚡ Ideal for fast billing, walk-ins, and standard hardware quotes'
+            : '🛠️ Full CPQ with turnkey room sections, multi-format presets & margin radar'}
+        </span>
+      </div>
+
+      {isExpressMode ? (
+        /* =========================================================================
+            STAFF-FRIENDLY EXPRESS WORKSPACE (SIMPLE 3-STEP FLOW)
+           ========================================================================= */
+        <div className="space-y-6">
+          {/* Express Mode Banner with 3-Step Visual Progress Indicator */}
+          <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white rounded-2xl p-5 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0">
+                  <Zap className="w-5 h-5 text-amber-300" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black tracking-tight flex items-center gap-2">
+                    Staff Express Mode &bull; Fast 3-Step Quotation
+                  </h2>
+                  <p className="text-xs text-blue-100">
+                    Fill Customer &rarr; Pick Equipment &rarr; Preview & Print. All GST, HSN & letterhead are auto-filled!
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs bg-white/10 px-3 py-1.5 rounded-xl border border-white/20 self-start md:self-auto">
+                <span className="text-blue-100">Need multi-room turnkey breakout?</span>
+                <button
+                  type="button"
+                  onClick={() => setIsExpressMode(false)}
+                  className="font-bold underline hover:text-amber-300 transition cursor-pointer"
+                >
+                  Switch to Advanced Mode &rarr;
+                </button>
+              </div>
+            </div>
+
+            {/* 3-Step Visual Indicator */}
+            <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-white/20 text-xs">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${
+                    customerName ? 'bg-emerald-400 text-emerald-950' : 'bg-white text-blue-700'
+                  }`}
+                >
+                  {customerName ? '✓' : '1'}
+                </span>
+                <div className="min-w-0">
+                  <span className="font-bold block truncate">1. Customer</span>
+                  <span className="text-[10px] text-blue-200 block truncate">
+                    {customerName || 'Select or enter'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${
+                    items.length > 0 ? 'bg-emerald-400 text-emerald-950' : 'bg-white text-blue-700'
+                  }`}
+                >
+                  {items.length > 0 ? '✓' : '2'}
+                </span>
+                <div className="min-w-0">
+                  <span className="font-bold block truncate">2. Products & Price</span>
+                  <span className="text-[10px] text-blue-200 block truncate">
+                    {items.length} {items.length === 1 ? 'item' : 'items'} added
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-white/80 text-blue-700 flex items-center justify-center text-xs font-black">
+                  3
+                </span>
+                <div className="min-w-0">
+                  <span className="font-bold block truncate">3. Print & Send</span>
+                  <span className="text-[10px] text-blue-200 block truncate">
+                    ₹{grandTotal > 0 ? Math.round(grandTotal).toLocaleString('en-IN') : '0'} Total
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* STEP 1: CUSTOMER (WHO IS THIS FOR?) */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center w-7 h-7 rounded-xl bg-blue-600 text-white text-xs font-black">
+                  1
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    Step 1: Customer Details
+                  </h3>
+                  <p className="text-[11px] text-slate-500">Search existing customer or type walk-in customer details.</p>
+                </div>
+              </div>
+              {selectedCustomerId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCustomerId('');
+                    setCustomerName('');
+                    setCompanyName('');
+                    setPhone('');
+                    setCustomerGstin('');
+                  }}
+                  className="text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200 transition cursor-pointer"
+                >
+                  ✕ Change Customer
+                </button>
+              )}
+            </div>
+
+            {selectedCustomerId ? (
+              /* Selected Customer Summary Card */
+              <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                      Active Customer Selected
+                    </span>
+                    {customerGstin && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-100 text-blue-800">
+                        GSTIN: {customerGstin}
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="text-base font-black text-slate-900">
+                    {companyName || customerName}
+                  </h4>
+                  <p className="text-xs text-slate-600">
+                    Contact: <strong className="text-slate-900">{customerName}</strong> &bull; Mobile:{' '}
+                    <strong className="text-slate-900 font-mono">{phone}</strong> {email && `• ${email}`}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-[11px] font-bold text-slate-500 block">Place of Supply</span>
+                  <span className="text-xs font-black text-blue-700">{placeOfSupply}</span>
+                </div>
+              </div>
+            ) : (
+              /* Customer Search & Direct Inputs */
+              <div className="space-y-3">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  <input
+                    type="text"
+                    value={customerSearch}
+                    onFocus={() => setIsCustomerDropdownOpen(true)}
+                    onChange={(e) => {
+                      setCustomerSearch(e.target.value);
+                      setIsCustomerDropdownOpen(true);
+                    }}
+                    placeholder="Search customer by name, company, phone or GSTIN..."
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 outline-none text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50/50"
+                  />
+
+                  {/* Customer Search Dropdown */}
+                  {isCustomerDropdownOpen && (
+                    <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100">
+                      {filteredCustomers.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-500">
+                          No matching customer found. Enter details below directly.
+                        </div>
+                      ) : (
+                        filteredCustomers.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => handleSelectCustomer(c)}
+                            className="w-full text-left p-3 hover:bg-blue-50/70 transition flex items-center justify-between text-xs cursor-pointer"
+                          >
+                            <div>
+                              <strong className="block font-bold text-slate-900">
+                                {c.company_name || c.customer_name}
+                              </strong>
+                              <span className="text-slate-500 text-[11px]">
+                                {c.customer_name} &bull; {c.phone} {c.gstin && `&bull; GSTIN: ${c.gstin}`}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                              {c.customer_type}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Direct Input for Walk-in / New Customer */}
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                    Or Type Customer Details Directly:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Customer Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        placeholder="e.g. Ramesh Kumar"
+                        className="w-full mt-1 p-2 bg-white rounded-lg border border-slate-200 font-bold text-slate-900 outline-none text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Mobile Phone *
+                      </label>
+                      <input
+                        type="text"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="10-digit mobile"
+                        className="w-full mt-1 p-2 bg-white rounded-lg border border-slate-200 font-mono font-bold text-slate-900 outline-none text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Company Name (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        placeholder="e.g. Swan Environmental"
+                        className="w-full mt-1 p-2 bg-white rounded-lg border border-slate-200 font-bold text-slate-900 outline-none text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* STEP 2: PRODUCTS & EQUIPMENT (WHAT ARE THEY BUYING?) */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center w-7 h-7 rounded-xl bg-indigo-600 text-white text-xs font-black">
+                  2
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    Step 2: Add Equipment & Services
+                  </h3>
+                  <p className="text-[11px] text-slate-500">Click a popular item below, search catalog, or add custom item.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddCustomItem}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Add Blank Row</span>
+              </button>
+            </div>
+
+            {/* 1-Click Popular Equipment Buttons */}
+            <div className="space-y-1.5 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                ⚡ 1-Click Popular Products (Click to add directly):
+              </span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleAddQuickItem(
+                      'BenQ TK710 4K Laser Cinema Projector',
+                      145000,
+                      '85286200',
+                      'BenQ',
+                      'TK710',
+                      'Nos.'
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white hover:bg-blue-50 text-slate-800 hover:text-blue-700 border border-slate-200 shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>📽️ BenQ 4K Laser Projector (₹1.45L)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleAddQuickItem(
+                      '75" 4K Interactive Flat Panel Display (Google EDLA Certified)',
+                      115000,
+                      '85285900',
+                      'ViewSonic',
+                      'IFP-75',
+                      'Nos.'
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white hover:bg-blue-50 text-slate-800 hover:text-blue-700 border border-slate-200 shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>🖥️ 75" Interactive Flat Panel (₹1.15L)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleAddQuickItem(
+                      'Dell Latitude 3440 Commercial Laptop (i5, 16GB, 512GB SSD)',
+                      54500,
+                      '84713010',
+                      'Dell',
+                      'Latitude 3440',
+                      'Nos.'
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white hover:bg-blue-50 text-slate-800 hover:text-blue-700 border border-slate-200 shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>💻 Dell Latitude Laptop (₹54.5K)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleAddQuickItem(
+                      'Poly Studio Video Conference Bar (4K Auto-Framing)',
+                      185000,
+                      '85176290',
+                      'Poly',
+                      'Studio X50',
+                      'Nos.'
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white hover:bg-blue-50 text-slate-800 hover:text-blue-700 border border-slate-200 shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>📹 Poly Studio VC Bar (₹1.85L)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleAddQuickItem(
+                      'CCTV 4-Camera Surveillance Kit with 1TB NVR & Cabling',
+                      28500,
+                      '85287200',
+                      'CP Plus',
+                      'CP-KIT-4',
+                      'Set'
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white hover:bg-blue-50 text-slate-800 hover:text-blue-700 border border-slate-200 shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>📹 CCTV 4-Cam Kit (₹28.5K)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleAddQuickItem(
+                      'Turnkey On-Site Mounting, Cabling & System Testing',
+                      5000,
+                      '998713',
+                      'ICON TECH PRO',
+                      'SRV-INSTALL',
+                      'Job'
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white hover:bg-emerald-50 text-slate-800 hover:text-emerald-700 border border-slate-200 shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>🔧 Installation & Testing (₹5,000)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Catalog Search Dropdown */}
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedCatalogSku}
+                onChange={(e) => {
+                  const sku = e.target.value;
+                  if (sku) {
+                    handleAddFromCatalog(sku);
+                    setSelectedCatalogSku('');
+                  }
+                }}
+                className="flex-1 p-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-slate-50/50 outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">+ Or choose any item from Catalog...</option>
+                {catalogProducts.map((p) => (
+                  <option key={p.sku} value={p.sku}>
+                    {p.name} • ₹{(p.selling_price || 0).toLocaleString('en-IN')} ({p.category_name || 'General'})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Simplified Express Items Table */}
+            {items.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50/50 border border-dashed border-slate-200 rounded-xl space-y-2">
+                <p className="text-xs text-slate-500 font-bold">No products added yet.</p>
+                <p className="text-[11px] text-slate-400">Click any of the popular buttons above or select from the catalog.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-700 font-bold uppercase text-[10px]">
+                      <th className="p-3 w-10 text-center">#</th>
+                      <th className="p-3 min-w-[280px]">Product / Equipment Title</th>
+                      <th className="p-3 w-36 text-center">Quantity</th>
+                      <th className="p-3 w-36 text-right">Selling Rate (₹)</th>
+                      <th className="p-3 w-36 text-right">Line Total (₹)</th>
+                      <th className="p-3 w-12 text-center"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {items.map((it, idx) => (
+                      <tr key={idx} className="hover:bg-blue-50/20 transition">
+                        <td className="p-3 text-center font-bold text-slate-400">{idx + 1}</td>
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={it.product_name}
+                            onChange={(e) => handleItemChange(idx, 'product_name', e.target.value)}
+                            className="w-full font-bold text-slate-900 bg-transparent border-b border-dashed border-slate-200 focus:border-blue-500 outline-none pb-0.5 text-xs"
+                            placeholder="Product or service name"
+                          />
+                          {it.brand && (
+                            <span className="text-[10px] text-slate-400 block mt-0.5 font-medium">
+                              {it.brand} {it.model ? `• ${it.model}` : ''}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleItemChange(idx, 'quantity', Math.max(1, Number(it.quantity || 1) - 1))
+                              }
+                              className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-black flex items-center justify-center cursor-pointer"
+                            >
+                              -
+                            </button>
+                            <span className="w-10 text-center font-bold text-slate-900 font-mono text-sm">
+                              {Number(it.quantity || 1)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleItemChange(idx, 'quantity', Number(it.quantity || 1) + 1)}
+                              className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-black flex items-center justify-center cursor-pointer"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </td>
+                        <td className="p-3 text-right">
+                          <input
+                            type="number"
+                            value={it.selling_price || ''}
+                            onChange={(e) => handleItemChange(idx, 'selling_price', Number(e.target.value) || 0)}
+                            className="w-28 p-1.5 rounded-lg border border-slate-200 font-mono font-bold text-right text-slate-900 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                            placeholder="0"
+                          />
+                        </td>
+                        <td className="p-3 text-right font-mono font-black text-slate-950 text-sm">
+                          ₹{it.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveItem(idx)}
+                            className="p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                            title="Delete item"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Quick Pricing Mode & Bank Note */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-600">Pricing Mode:</span>
+                <button
+                  type="button"
+                  onClick={() => setPricingMode(pricingMode === 'INCLUSIVE' ? 'EXCLUSIVE' : 'INCLUSIVE')}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 font-bold text-slate-800 hover:border-blue-500 transition cursor-pointer"
+                >
+                  {pricingMode === 'INCLUSIVE' ? '✓ GST 18% Included' : 'Before GST (Exclusive)'}
+                </button>
+                <span className="text-slate-400 text-[11px]">(Click to switch between Before GST and GST Included)</span>
+              </div>
+              <div className="flex items-center gap-2 text-slate-500 text-[11px]">
+                <span>
+                  Bank: <strong className="text-slate-700">{selectedBank.bank_name}</strong> &bull; Validity:{' '}
+                  <strong className="text-slate-700">{validityDays} Days</strong>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* STEP 3: SUMMARY & 1-CLICK ACTIONS */}
+          <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-xl flex flex-col md:flex-row items-center justify-between gap-5">
+            <div>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                Step 3: Total Quotation Amount ({items.length} {items.length === 1 ? 'item' : 'items'})
+              </span>
+              <div className="flex items-baseline gap-3 mt-1">
+                <span className="text-3xl sm:text-4xl font-black font-mono text-white tracking-tight">
+                  ₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-xs text-emerald-400 font-bold bg-emerald-950/80 border border-emerald-700/80 px-2.5 py-0.5 rounded-full">
+                  GST 18% Included
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                {numberToWordsINR(grandTotal)}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap w-full md:w-auto justify-end">
+              <button
+                type="button"
+                onClick={() => handleSave('Draft')}
+                disabled={isSubmitting || items.length === 0}
+                className="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 transition cursor-pointer"
+              >
+                💾 Save Draft
+              </button>
+              <button
+                type="button"
+                onClick={handleWhatsAppShare}
+                disabled={items.length === 0}
+                className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>📲 Send WhatsApp</span>
+              </button>
+              <button
+                type="button"
+                onClick={handlePreviewClick}
+                disabled={items.length === 0}
+                className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs shadow-lg shadow-blue-500/30 transition flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Printer className="w-4 h-4" />
+                <span>👁️ Preview & Print Quote</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Main Two-Column Layout (Advanced Mode) */
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Form Sections (8 Cols) */}
         <div className="lg:col-span-8 space-y-6">
           {/* =========================================================================
@@ -2682,6 +3323,7 @@ export function QuotationFormWorkspace({
           </div>
         </div>
       </div>
+      )}
 
       {/* =========================================================================
           SECTION 5: PERSISTENT BOTTOM ACTION BAR
@@ -2760,6 +3402,18 @@ export function QuotationFormWorkspace({
             >
               <Mail className="w-4 h-4" />
               <span>SEND TO CUSTOMER</span>
+            </button>
+
+            {/* WHATSAPP SHARE */}
+            <button
+              type="button"
+              disabled={items.length === 0}
+              onClick={handleWhatsAppShare}
+              className="px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 text-emerald-800 border border-emerald-300 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              title="Share quotation summary on WhatsApp"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-700" />
+              <span className="hidden sm:inline">WhatsApp</span>
             </button>
           </div>
         </div>
