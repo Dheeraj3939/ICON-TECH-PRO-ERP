@@ -80,25 +80,7 @@ const DEFAULT_APPROVAL_RULES: ApprovalRuleConfig[] = [
   },
 ];
 
-const INITIAL_REQUESTS: ApprovalRequest[] = [
-  {
-    id: 'APR-001',
-    request_number: 'ICON/26-27/APR-0001',
-    approval_type: 'DISCOUNT',
-    entity_type: 'quotations',
-    entity_id: 'QT-1099',
-    entity_number: 'ICON-EST-1099',
-    requested_by_name: 'Vamshi Krishna',
-    requested_by_role: 'Sales Executive',
-    required_approver_role: 'BDM',
-    requested_value: 8.5,
-    threshold_limit: 5.0,
-    status: 'PENDING',
-    approval_notes: 'Client requested institutional education pricing for 5 classrooms.',
-    prevent_self_approval: true,
-    created_at: '2026-04-05T11:00:00.000Z',
-  },
-];
+const INITIAL_REQUESTS: ApprovalRequest[] = [];
 
 function getInternalRequestsStore(): ApprovalRequest[] {
   if (!globalThis.__ICON_APPROVAL_REQUESTS__) {

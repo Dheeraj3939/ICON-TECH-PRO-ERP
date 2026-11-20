@@ -17,60 +17,7 @@ declare global {
   var __ICON_NOTIFICATIONS__: EnterpriseNotification[] | undefined;
 }
 
-const SEED_NOTIFICATIONS: EnterpriseNotification[] = [
-  {
-    id: 'NOTIF-001',
-    user_role: 'Managing Director',
-    category: 'AMC_EXPIRY',
-    title: 'AMC Contract Expiring in 33 Days',
-    message: 'Sri Sai Hospitals & Diagnostic Center AMC (AMC260001) expires on 31-Oct-2026. Renewal opportunity AMC-OPP-26-0001 has been generated.',
-    entity_type: 'amc_contracts',
-    entity_id: 'AMC260001',
-    action_url: '/dashboard/service',
-    is_read: false,
-    priority: 'HIGH',
-    created_at: '2026-09-28T09:00:00Z',
-  },
-  {
-    id: 'NOTIF-002',
-    user_role: 'Admin / BDM',
-    category: 'QUOTATION_APPROVAL',
-    title: 'Discount Approval Required (18% Discount)',
-    message: 'Quotation QTN-26-0042 for Cyient Technologies requires executive review. Requested margin is 13.5%.',
-    entity_type: 'quotations',
-    entity_id: 'QTN-26-0042',
-    action_url: '/dashboard/quotations',
-    is_read: false,
-    priority: 'HIGH',
-    created_at: '2026-09-28T08:30:00Z',
-  },
-  {
-    id: 'NOTIF-003',
-    user_role: 'Accounts',
-    category: 'PAYMENT_RECEIVED',
-    title: 'Payment Received ₹30,000 via NEFT',
-    message: 'Payment allocated to Invoice INV260001 for T-Hub Foundation. Balance updated to ₹37,850.',
-    entity_type: 'invoices',
-    entity_id: 'INV260001',
-    action_url: '/dashboard/invoices',
-    is_read: true,
-    priority: 'MEDIUM',
-    created_at: '2026-09-27T16:00:00Z',
-  },
-  {
-    id: 'NOTIF-004',
-    user_role: 'Managing Director',
-    category: 'DOCUMENT_EXPIRY',
-    title: 'Distributor Pricing Matrix Expiring',
-    message: 'BenQ Commercial Display Distribution Agreement & Price Matrix expires on 31-Dec-2026.',
-    entity_type: 'documents',
-    entity_id: 'DOC-26-0003',
-    action_url: '/dashboard/documents',
-    is_read: false,
-    priority: 'MEDIUM',
-    created_at: '2026-09-27T10:00:00Z',
-  },
-];
+const SEED_NOTIFICATIONS: EnterpriseNotification[] = [];
 
 function getNotificationsStore(): EnterpriseNotification[] {
   if (!globalThis.__ICON_NOTIFICATIONS__) {

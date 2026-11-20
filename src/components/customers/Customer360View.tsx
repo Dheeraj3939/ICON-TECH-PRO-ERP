@@ -1003,6 +1003,50 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
             </div>
           </div>
 
+          {/* Tally Master Ledger & Account Card */}
+          {(() => {
+            const tallyLedger = tallySyncItems.find(
+              (item) => item.entity_type === 'CUSTOMER' && item.tally_voucher_type?.includes('Tally Ledger')
+            );
+            return (
+              <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-5 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                      TallyPrime Master Ledger
+                    </span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      Sundry Debtors Verified
+                    </span>
+                  </div>
+                  <h4 className="text-base font-bold text-white flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-400" />
+                    {tallyLedger ? tallyLedger.entity_number : customer.company_name || customer.customer_name}
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Parent Group: <span className="text-slate-200 font-medium">Sundry Debtors</span> • Tally Integration: <span className="text-emerald-400 font-mono font-semibold">Live 1-Way Auto Bridge</span>
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right sm:border-l sm:border-slate-700/80 sm:pl-4">
+                    <span className="text-[11px] text-slate-400 block">Total Synced Vouchers</span>
+                    <span className="text-lg font-black text-blue-400">
+                      {tallySyncItems.length}
+                    </span>
+                  </div>
+                  <Link
+                    href={`/dashboard/tally?search=${encodeURIComponent(customer.company_name || customer.customer_name)}`}
+                    className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap shadow-sm"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    View in Tally Module
+                  </Link>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Tax Invoices Section */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center justify-between">

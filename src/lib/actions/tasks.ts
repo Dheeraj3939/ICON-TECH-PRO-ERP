@@ -14,56 +14,7 @@ declare global {
   var __ICON_TASKS__: ERPTask[] | undefined;
 }
 
-const INITIAL_TASKS: ERPTask[] = [
-  {
-    id: 'TSK-001',
-    task_number: 'ICON/26-27/TSK-0001',
-    task_type: 'QUOTATION_FOLLOWUP',
-    related_entity_type: 'quotations',
-    related_entity_id: 'QT-1099',
-    related_entity_number: 'ICON-EST-1099',
-    title: 'Follow up on 4K AV Infrastructure Quotation',
-    notes: 'Client requested institutional approval; check committee status.',
-    assigned_user_name: 'Vamshi Krishna',
-    priority: 'HIGH',
-    due_date: '2026-04-10',
-    status: 'Pending',
-    created_by_name: 'Dheeraj',
-    created_at: '2026-04-05T10:00:00.000Z',
-  },
-  {
-    id: 'TSK-002',
-    task_number: 'ICON/26-27/TSK-0002',
-    task_type: 'PAYMENT_COLLECTION',
-    related_entity_type: 'invoices',
-    related_entity_id: 'INV-260002',
-    related_entity_number: 'ICON/26-27/INV-0002',
-    title: 'Collect Balance Payment of ₹1,48,000',
-    notes: 'Payment terms 30 days due on April 15.',
-    assigned_user_name: 'Vamshi Krishna',
-    priority: 'URGENT',
-    due_date: '2026-04-15',
-    status: 'Pending',
-    created_by_name: 'Managing Director',
-    created_at: '2026-04-06T11:30:00.000Z',
-  },
-  {
-    id: 'TSK-003',
-    task_number: 'ICON/26-27/TSK-0003',
-    task_type: 'AMC_RENEWAL',
-    related_entity_type: 'customers',
-    related_entity_id: 'CUST0001',
-    related_entity_number: 'CUST0001',
-    title: 'Pitch 1-Year Comprehensive AMC Renewal',
-    notes: 'Warranty expiring on 2x Interactive Flat Panels.',
-    assigned_user_name: 'Vamshi Krishna',
-    priority: 'MEDIUM',
-    due_date: '2026-04-18',
-    status: 'In Progress',
-    created_by_name: 'Dheeraj',
-    created_at: '2026-04-07T09:15:00.000Z',
-  },
-];
+const INITIAL_TASKS: ERPTask[] = [];
 
 function getInternalTasksStore(): ERPTask[] {
   if (!globalThis.__ICON_TASKS__) {

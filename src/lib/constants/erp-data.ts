@@ -16,6 +16,7 @@ import {
 import type { Customer } from '@/types/customer';
 
 const isUatEnvironment = process.env.NEXT_PUBLIC_ERP_ENV?.trim().toUpperCase() === 'UAT';
+const isLiveOrUat = true; // Strict live policy: ERP syncs and displays only real database & Tally records
 
 // The team members: In production and UAT, full organization staff roster
 export const STAFF_MEMBERS: UserStaff[] = isUatEnvironment
@@ -101,7 +102,7 @@ export const STAFF_MEMBERS: UserStaff[] = isUatEnvironment
       },
     ];
 
-export const INITIAL_CUSTOMERS: Customer[] = [
+export const INITIAL_CUSTOMERS: Customer[] = isLiveOrUat ? [] : [
   {
     id: 'CUST-TEST-001',
     customer_code: 'ICON260099',
@@ -628,7 +629,7 @@ export const INITIAL_SUPPLIERS: Supplier[] = [
   },
 ];
 
-export const INITIAL_ENQUIRIES: Enquiry[] = [
+export const INITIAL_ENQUIRIES: Enquiry[] = isLiveOrUat ? [] : [
   {
     id: 'ENQ260001',
     enquiry_number: 'ENQ260001',
@@ -759,7 +760,7 @@ export const INITIAL_ENQUIRIES: Enquiry[] = [
   },
 ];
 
-export const INITIAL_QUOTATIONS: Quotation[] = [
+export const INITIAL_QUOTATIONS: Quotation[] = isLiveOrUat ? [] : [
   {
     id: 'QT-UAT-HT-01',
     quotation_number: 'ICON/26-27/QT-1001',
@@ -1160,7 +1161,7 @@ export const INITIAL_QUOTATIONS: Quotation[] = [
   },
 ];
 
-export const INITIAL_ORDERS: SalesOrder[] = [
+export const INITIAL_ORDERS: SalesOrder[] = isLiveOrUat ? [] : [
   {
     id: 'ORD260001',
     order_number: 'ORD260001',
@@ -1313,7 +1314,7 @@ export const INITIAL_ORDERS: SalesOrder[] = [
   },
 ];
 
-export const INITIAL_INVOICES: Invoice[] = [
+export const INITIAL_INVOICES: Invoice[] = isLiveOrUat ? [] : [
   {
     id: 'INV260001',
     invoice_number: 'INV260001',
@@ -1488,7 +1489,7 @@ export const INITIAL_INVOICES: Invoice[] = [
   },
 ];
 
-export const INITIAL_PAYMENTS: Payment[] = [
+export const INITIAL_PAYMENTS: Payment[] = isLiveOrUat ? [] : [
   {
     id: 'PAY260001',
     payment_number: 'PAY260001',
@@ -1521,7 +1522,7 @@ export const INITIAL_PAYMENTS: Payment[] = [
   },
 ];
 
-export const INITIAL_DISPATCHES: Dispatch[] = [
+export const INITIAL_DISPATCHES: Dispatch[] = isLiveOrUat ? [] : [
   {
     id: 'DSP260001',
     dispatch_number: 'DSP260001',
@@ -1540,7 +1541,7 @@ export const INITIAL_DISPATCHES: Dispatch[] = [
   },
 ];
 
-export const INITIAL_SERVICE_TICKETS: ServiceTicket[] = [
+export const INITIAL_SERVICE_TICKETS: ServiceTicket[] = isLiveOrUat ? [] : [
   {
     id: 'SRV260001',
     ticket_number: 'SRV260001',
@@ -1574,7 +1575,7 @@ export const INITIAL_SERVICE_TICKETS: ServiceTicket[] = [
   },
 ];
 
-export const INITIAL_RENTALS: EquipmentRental[] = [
+export const INITIAL_RENTALS: EquipmentRental[] = isLiveOrUat ? [] : [
   {
     id: 'RNT260001',
     rental_number: 'RNT260001',
@@ -1592,7 +1593,7 @@ export const INITIAL_RENTALS: EquipmentRental[] = [
   },
 ];
 
-export const INITIAL_AUDIT_LOGS: AuditLog[] = [
+export const INITIAL_AUDIT_LOGS: AuditLog[] = isLiveOrUat ? [] : [
   {
     id: 'AUD006',
     timestamp: '2026-09-04 13:45:10',

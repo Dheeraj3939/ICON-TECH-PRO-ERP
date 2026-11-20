@@ -122,68 +122,16 @@ export function Header({
     }
   };
 
-  const notifications = [
-    {
-      id: 'n1',
-      category: 'URGENT',
-      color: 'bg-rose-500',
-      icon: AlertCircle,
-      title: 'Quotation follow-up due today',
-      desc: 'Cyient Technologies (₹2,10,000) proposal awaiting purchase order confirmation.',
-      time: 'Today, 10:00 AM',
-      href: '/dashboard/follow-ups',
-    },
-    {
-      id: 'n2',
-      category: 'URGENT',
-      color: 'bg-rose-500',
-      icon: CreditCard,
-      title: 'Payment overdue past 30 days',
-      desc: 'Invoice INV-26-0042 balance ₹86,400 due from corporate client.',
-      time: 'Overdue by 3 days',
-      href: '/dashboard/invoices',
-    },
-    {
-      id: 'n3',
-      category: 'TODAY',
-      color: 'bg-amber-500',
-      icon: Calendar,
-      title: 'Site survey scheduled for 2:30 PM',
-      desc: 'HITEC City Smart Classroom survey assigned to field engineering team.',
-      time: 'Today, 2:30 PM',
-      href: '/dashboard/site-visits',
-    },
-    {
-      id: 'n4',
-      category: 'NEW',
-      color: 'bg-blue-500',
-      icon: FileSpreadsheet,
-      title: 'New customer enquiry assigned',
-      desc: 'Interactive Displays & Smart Boards requirement logged from T-Hub Foundation.',
-      time: 'Today, 9:15 AM',
-      href: '/dashboard/enquiries',
-    },
-    {
-      id: 'n5',
-      category: 'NEW',
-      color: 'bg-blue-500',
-      icon: Clock,
-      title: 'AMC contract expires in 45 days',
-      desc: 'Sri Sai Hospitals maintenance contract reaches renewal window on 31-Oct-2026.',
-      time: 'Renewal Radar Active',
-      href: '/dashboard/service',
-    },
-    {
-      id: 'n6',
-      category: 'DONE',
-      color: 'bg-emerald-500',
-      icon: CheckCircle2,
-      title: 'Payment received: ₹1,25,000',
-      desc: 'RTGS clearance recorded for Invoice INV260001. Customer ledger updated.',
-      time: 'Yesterday',
-      href: '/dashboard/invoices',
-    },
-  ];
+  const notifications: Array<{
+    id: string;
+    category: string;
+    color: string;
+    icon: any;
+    title: string;
+    desc: string;
+    time: string;
+    href: string;
+  }> = [];
 
   const filteredNotifs = notifications.filter((n) => {
     if (notifFilter === 'ALL') return true;
@@ -291,7 +239,9 @@ export function Header({
               className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-200/80 transition relative cursor-pointer"
             >
               <Bell className="w-4 h-4" />
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white animate-pulse" />
+              {filteredNotifs.length > 0 && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white animate-pulse" />
+              )}
             </button>
 
             {/* Notification Center Dropdown */}
@@ -307,7 +257,7 @@ export function Header({
                       </span>
                     </div>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                      6 Updates
+                      {filteredNotifs.length} Updates
                     </span>
                   </div>
 
@@ -337,30 +287,38 @@ export function Header({
 
                   {/* Notification Items List */}
                   <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 p-1">
-                    {filteredNotifs.map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <Link
-                          key={item.id}
-                          href={item.href}
-                          onClick={() => setIsNotifOpen(false)}
-                          className="p-3 hover:bg-slate-50 flex items-start gap-3 transition rounded-xl block group"
-                        >
-                          <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${item.color}`} />
-                          <div className="min-w-0 flex-1">
-                            <span className="text-xs font-bold text-slate-900 group-hover:text-blue-600 block">
-                              {item.title}
-                            </span>
-                            <p className="text-[11px] text-slate-500 line-clamp-2 mt-0.5">
-                              {item.desc}
-                            </p>
-                            <span className="text-[10px] text-slate-400 mt-1 block">
-                              {item.time}
-                            </span>
-                          </div>
-                        </Link>
-                      );
-                    })}
+                    {filteredNotifs.length > 0 ? (
+                      filteredNotifs.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <Link
+                            key={item.id}
+                            href={item.href}
+                            onClick={() => setIsNotifOpen(false)}
+                            className="p-3 hover:bg-slate-50 flex items-start gap-3 transition rounded-xl block group"
+                          >
+                            <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${item.color}`} />
+                            <div className="min-w-0 flex-1">
+                              <span className="text-xs font-bold text-slate-900 group-hover:text-blue-600 block">
+                                {item.title}
+                              </span>
+                              <p className="text-[11px] text-slate-500 line-clamp-2 mt-0.5">
+                                {item.desc}
+                              </p>
+                              <span className="text-[10px] text-slate-400 mt-1 block">
+                                {item.time}
+                              </span>
+                            </div>
+                          </Link>
+                        );
+                      })
+                    ) : (
+                      <div className="py-8 px-4 text-center">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-80" />
+                        <p className="text-xs font-bold text-slate-800">All caught up!</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">No pending notifications or alerts</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </>

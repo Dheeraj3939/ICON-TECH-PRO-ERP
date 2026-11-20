@@ -157,13 +157,19 @@ export async function getCustomer360Data(
 
     const custId = customer.id;
     const custCode = customer.customer_code;
-    const custName = customer.customer_name.toLowerCase();
-    const compName = (customer.company_name || '').toLowerCase();
+    const cleanCustName = (customer.customer_name || '').trim().toLowerCase();
+    const cleanCompName = (customer.company_name || '').trim().toLowerCase();
+    const custName = cleanCustName;
+    const compName = cleanCompName;
 
     const matchesCust = (id?: string | null, name?: string | null, comp?: string | null) => {
       if (id && (id === custId || id === custCode)) return true;
-      if (name && (name.toLowerCase().includes(custName) || (compName && name.toLowerCase().includes(compName)))) return true;
-      if (comp && ((compName && comp.toLowerCase().includes(compName)) || comp.toLowerCase().includes(custName))) return true;
+      const lowerName = (name || '').trim().toLowerCase();
+      const lowerComp = (comp || '').trim().toLowerCase();
+      if (cleanCustName.length >= 3 && lowerName.includes(cleanCustName)) return true;
+      if (cleanCompName.length >= 3 && lowerName.includes(cleanCompName)) return true;
+      if (cleanCompName.length >= 3 && lowerComp.includes(cleanCompName)) return true;
+      if (cleanCustName.length >= 3 && lowerComp.includes(cleanCustName)) return true;
       return false;
     };
 
@@ -194,7 +200,7 @@ export async function getCustomer360Data(
       getSiteVisits().catch(() => []),
       getQuotations({ customer_id: custId, search: customer.customer_name }).catch(() => ({ quotations: [], total: 0 })),
       getOrders({ customer_id: custId, search: customer.customer_name }).catch(() => ({ orders: [], total: 0 })),
-      getInvoices({ customer_id: custId, search: customer.customer_name }).catch(() => ({ invoices: [], total: 0 })),
+      getInvoices({ customer_id: custId, search: customer.company_name || customer.customer_name }).catch(() => ({ invoices: [], total: 0 })),
       getPayments().catch(() => ({ payments: [], total: 0 })),
       getInstallations().catch(() => []),
       getSerialRecords().catch(() => ({ records: [], total: 0 })),
@@ -349,18 +355,31 @@ export async function getCustomer360Data(
           ...searchTerms.map((t) => `tally_ledger_name.ilike.%${t.replace(/[,%()]/g, ' ').trim()}%`),
         ].join(',');
 
-        const [matchRes, reconRes] = await Promise.all([
+        const invIds = invoices.map((i) => i.id).filter(Boolean);
+        const reconClauses = [
+          `erp_id.eq.${customer.id}`,
+          ...(invIds.length > 0 ? [`erp_id.in.(${invIds.join(',')})`] : []),
+          ...searchTerms.map((t) => `notes.ilike.%${t.replace(/[,%()]/g, ' ').trim()}%`),
+        ].join(',');
+
+        const [matchRes, reconRes, unallocatedRes] = await Promise.all([
           admin.from('tally_customer_ledger_matches').select('*').or(orClauses),
           admin
             .from('tally_reconciliations')
             .select('*')
-            .or(`erp_id.eq.${customer.id},${searchTerms.map((t) => `notes.ilike.%${t.replace(/[,%()]/g, ' ').trim()}%`).join(',')}`)
+            .or(reconClauses)
             .order('tally_date', { ascending: false })
             .limit(100),
+          admin
+            .from('tally_unallocated_receipts')
+            .select('*')
+            .or(`customer_name.ilike.%${customer.customer_name}%,customer_name.ilike.%${customer.company_name || customer.customer_name}%`)
+            .limit(20),
         ]);
 
         const matches = matchRes.data || [];
         tallyReconciliationsList = reconRes.data || [];
+        const unallocated = unallocatedRes?.data || [];
 
         // Map verified Tally ledger matches
         for (const m of matches) {
@@ -376,6 +395,23 @@ export async function getCustomer360Data(
             max_retries: 3,
             created_at: m.created_at || new Date().toISOString(),
             synced_at: m.created_at || new Date().toISOString(),
+          });
+        }
+
+        // Map on-account unallocated receipts from Tally
+        for (const u of unallocated) {
+          inboundTallyItems.push({
+            id: u.id,
+            entity_type: 'PAYMENT' as any,
+            entity_id: u.id,
+            entity_number: u.receipt_voucher_no,
+            tally_voucher_type: `Tally On-Account Receipt (${u.tally_reference_type || 'Unallocated'})`,
+            payload_summary: `Unallocated Balance: ₹${Number(u.unallocated_balance || 0).toLocaleString('en-IN')} • Date: ${u.receipt_date || 'N/A'}`,
+            status: 'SUCCESS',
+            retry_count: 0,
+            max_retries: 3,
+            created_at: u.created_at || new Date().toISOString(),
+            synced_at: u.updated_at || new Date().toISOString(),
           });
         }
 
