@@ -36,6 +36,7 @@ import {
   Search,
   Filter,
   FileCheck,
+  Printer,
 } from 'lucide-react';
 import { UploadSignedDocumentModal } from '@/components/modals/UploadSignedDocumentModal';
 import type { Customer360Dossier } from '@/lib/actions/customer360';
@@ -1019,9 +1020,14 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
                   <div key={inv.id} className="py-3 flex items-center justify-between">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-xs text-slate-900">
-                          {inv.invoice_number}
-                        </span>
+                        <Link
+                          href={`/dashboard/invoices?search=${encodeURIComponent(inv.invoice_number)}&open=${encodeURIComponent(inv.invoice_number)}`}
+                          className="font-mono font-bold text-xs text-brand-700 hover:text-brand-900 hover:underline flex items-center gap-1.5"
+                          title="Open Tax Invoice in ERP"
+                        >
+                          <span>{inv.invoice_number}</span>
+                          <Printer className="w-3 h-3 text-slate-400 hover:text-brand-600" />
+                        </Link>
                         <span
                           className={`text-[10px] px-2 py-0.5 rounded font-bold ${
                             inv.status === 'Paid'
@@ -1036,13 +1042,22 @@ export function Customer360View({ dossier }: Customer360ViewProps) {
                         Date: {inv.invoice_date} • Due: {inv.due_date || 'Immediate'}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <span className="text-sm font-black text-slate-900 block">
-                        ₹{inv.grand_total.toLocaleString('en-IN')}
-                      </span>
-                      <span className="text-xs font-semibold text-rose-600">
-                        Bal: ₹{inv.balance_amount.toLocaleString('en-IN')}
-                      </span>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <span className="text-sm font-black text-slate-900 block">
+                          ₹{inv.grand_total.toLocaleString('en-IN')}
+                        </span>
+                        <span className="text-xs font-semibold text-rose-600">
+                          Bal: ₹{inv.balance_amount.toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                      <Link
+                        href={`/dashboard/invoices?search=${encodeURIComponent(inv.invoice_number)}&open=${encodeURIComponent(inv.invoice_number)}`}
+                        className="p-1.5 rounded-lg border border-slate-200 hover:bg-brand-50 hover:text-brand-700 hover:border-brand-300 text-slate-500 transition"
+                        title="Print / View Invoice"
+                      >
+                        <Printer className="w-4 h-4" />
+                      </Link>
                     </div>
                   </div>
                 ))}

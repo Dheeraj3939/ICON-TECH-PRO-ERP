@@ -55,7 +55,38 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     getCurrentSessionUser().then(setCurrentUser);
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const searchParam =
+        params.get('search') ||
+        params.get('invoice_number') ||
+        params.get('open') ||
+        params.get('print');
+      if (searchParam) {
+        setSearch(searchParam);
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && invoices.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const openParam = params.get('open') || params.get('print');
+      if (openParam && !selectedPrintInvoice) {
+        const found = invoices.find(
+          (inv) =>
+            inv.invoice_number.toLowerCase() === openParam.toLowerCase() ||
+            inv.id.toLowerCase() === openParam.toLowerCase() ||
+            (inv.company_name && inv.company_name.toLowerCase().includes(openParam.toLowerCase())) ||
+            (inv.customer_name && inv.customer_name.toLowerCase().includes(openParam.toLowerCase()))
+        );
+        if (found) {
+          setSelectedPrintInvoice(found);
+        }
+      }
+    }
+  }, [invoices]);
 
   useEffect(() => {
     loadData();
@@ -319,7 +350,14 @@ export default function InvoicesPage() {
                 {paginatedInvoices.map((inv) => (
                   <tr key={inv.id} className="hover:bg-slate-50/70 transition">
                     <td className="py-3 px-3 align-top font-bold text-slate-900">
-                      <span className="font-mono text-brand-700 block">{inv.invoice_number}</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPrintInvoice(inv)}
+                        className="font-mono text-brand-700 hover:text-brand-900 hover:underline block text-left"
+                        title="Click to Open & Print Tax Invoice"
+                      >
+                        {inv.invoice_number}
+                      </button>
                       <div className="text-[10.5px] text-slate-500 font-normal mt-0.5">
                         <span>Inv: {inv.invoice_date}</span>
                         <span className="block text-slate-400">Due: {inv.due_date}</span>
@@ -408,9 +446,15 @@ export default function InvoicesPage() {
             {paginatedInvoices.map((inv) => (
               <div key={inv.id} className="pt-3 first:pt-0 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-black text-brand-700">
-                    {inv.invoice_number}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPrintInvoice(inv)}
+                    className="font-mono text-xs font-black text-brand-700 hover:underline flex items-center gap-1.5"
+                    title="Click to Open & Print Tax Invoice"
+                  >
+                    <span>{inv.invoice_number}</span>
+                    <Printer className="w-3 h-3 text-slate-400" />
+                  </button>
                   <span
                     className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                       inv.status === 'Paid'

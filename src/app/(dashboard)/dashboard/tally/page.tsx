@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import {
   Layers,
   RefreshCw,
@@ -946,7 +947,18 @@ export default function TallyIntegrationCenterPage() {
                   reconciliationItems.map((item) => (
                     <tr key={item.id}>
                       <td className="py-3 px-3 font-bold truncate">
-                        {item.erp_number}
+                        {item.entity_type === 'INVOICE' ? (
+                          <Link
+                            href={`/dashboard/invoices?search=${encodeURIComponent(item.erp_number || item.tally_voucher_number || '')}&open=${encodeURIComponent(item.erp_number || item.tally_voucher_number || '')}`}
+                            className="text-brand-700 hover:text-brand-900 hover:underline inline-flex items-center gap-1 font-mono"
+                            title="Open & Print Invoice in ERP"
+                          >
+                            <span>{item.erp_number}</span>
+                            <ExternalLink className="w-2.5 h-2.5 text-slate-400" />
+                          </Link>
+                        ) : (
+                          <span>{item.erp_number}</span>
+                        )}
                         <span className="block text-[10px] font-normal text-slate-400 truncate">
                           {item.entity_type}{item.tally_voucher_number ? ` · Tally #${item.tally_voucher_number}` : ''}
                         </span>
