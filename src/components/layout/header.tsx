@@ -25,6 +25,8 @@ import {
   ExternalLink,
   Menu,
   X,
+  Settings,
+  Shield,
 } from 'lucide-react';
 import type { BusinessEntityCode, UserRoleName } from '@/types/database';
 import { CommandPalette } from '@/components/search/CommandPalette';
@@ -463,120 +465,80 @@ export function Header({
             </button>
           </form>
 
-          {/* Team Switcher Floating Popover */}
+          {/* Professional User Profile Popover */}
           {isMenuOpen && (
             <>
               <div
                 className="fixed inset-0 z-30"
                 onClick={() => setIsMenuOpen(false)}
               />
-              <div className="absolute right-0 top-14 z-40 w-[calc(100vw-1.5rem)] sm:w-80 max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in-50 zoom-in-95 duration-150">
-                {/* Header Title */}
-                <div className="p-3.5 bg-slate-900 text-white border-b border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Users className="w-4 h-4 text-blue-400" />
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                        {isUat ? 'UAT TEST USER SESSION — PORT 3001' : 'Staff Profile'}
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                      {isUat ? 'Port 3001' : 'Production'}
-                    </span>
+              <div className="absolute right-0 top-14 z-40 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in-50 zoom-in-95 duration-150">
+                {/* User Identity Header */}
+                <div className="p-4 bg-slate-50/80 border-b border-slate-100 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-xs shrink-0">
+                    {userName?.charAt(0) || 'U'}
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    {isUat
-                      ? 'Select any legitimate user to switch your active UAT session with their authentic RBAC permissions.'
-                      : 'Authenticated enterprise employee session.'}
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold text-slate-900 truncate">
+                      {userName}
+                    </div>
+                    <div className="text-[11px] font-medium text-slate-500 truncate">
+                      {userRole === 'Admin / BDM' ? 'Admin' : userRole}
+                    </div>
+                  </div>
                 </div>
 
-                {/* Content: Team Switcher in UAT, Profile Info in Production */}
-                {isUat ? (
-                  <div className="p-2 space-y-1 max-h-72 overflow-y-auto">
-                    {TEAM_MEMBERS.map((member) => {
-                      const isActive = userName === member.name;
-                      return (
-                        <button
-                          key={member.name}
-                          type="button"
-                          onClick={() => {
-                            setIsMenuOpen(false);
-                            handleSwitchRole(member.name, member.role);
-                          }}
-                          disabled={isSwitching !== null}
-                          className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition ${
-                            isActive
-                              ? 'bg-blue-50 border border-blue-200'
-                              : 'hover:bg-slate-50 border border-transparent'
-                          }`}
-                        >
-                          <div className="min-w-0 pr-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-bold text-slate-900 truncate">
-                                {member.name}
-                              </span>
-                              {isActive && (
-                                <span className="w-2 h-2 rounded-full bg-blue-600" />
-                              )}
-                            </div>
-                            <p className="text-[10px] text-slate-500 truncate">
-                              {member.desc}
-                            </p>
-                            <span className={`inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded border ${member.badge}`}>
-                              {member.role}
-                            </span>
-                          </div>
-
-                          {isActive ? (
-                            <span className="text-[10px] font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded-md">
-                              Active
-                            </span>
-                          ) : isSwitching === member.name ? (
-                            <span className="w-3.5 h-3.5 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
-                          ) : (
-                            <span className="text-[10px] text-slate-400 hover:text-blue-600 font-medium">
-                              Switch &rarr;
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="p-4 space-y-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 font-bold flex items-center justify-center text-sm">
-                        {userName?.charAt(0) || 'U'}
-                      </div>
-                      <div>
-                        <div className="text-sm font-bold text-slate-900">{userName}</div>
-                        <div className="text-xs text-slate-500">{userRole}</div>
-                      </div>
-                    </div>
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                      <span>Enterprise Security</span>
-                      <span className="font-mono text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                        ACTIVE
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Local Wi-Fi Sharing Footer */}
-                <div className="p-3 bg-slate-50 border-t border-slate-200 text-xs flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-slate-600 text-[11px]">
-                    <Wifi className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Wi-Fi URL:</span>
-                    <span className="font-mono font-bold text-slate-900">192.168.1.108:3000</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleCopyLanLink}
-                    className="text-[10.5px] font-bold text-blue-600 hover:text-blue-700"
+                {/* Professional Menu Items */}
+                <div className="p-2 space-y-0.5 text-xs">
+                  <Link
+                    href="/dashboard/employees"
+                    onClick={() => setIsMenuOpen(false)}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-slate-700 hover:text-slate-900 hover:bg-slate-100 font-semibold transition"
                   >
-                    {copiedLink ? 'Copied!' : 'Copy'}
-                  </button>
+                    <User className="w-4 h-4 text-slate-400" />
+                    <span>Profile Details</span>
+                  </Link>
+
+                  <Link
+                    href="/dashboard/settings"
+                    onClick={() => setIsMenuOpen(false)}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-slate-700 hover:text-slate-900 hover:bg-slate-100 font-semibold transition"
+                  >
+                    <Settings className="w-4 h-4 text-slate-400" />
+                    <span>Settings &amp; Preferences</span>
+                  </Link>
+
+                  <Link
+                    href="/dashboard/settings/security"
+                    onClick={() => setIsMenuOpen(false)}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-slate-700 hover:text-slate-900 hover:bg-slate-100 font-semibold transition"
+                  >
+                    <Shield className="w-4 h-4 text-slate-400" />
+                    <span>Security &amp; Password</span>
+                  </Link>
+
+                  {(userRole === 'Admin' || userRole === 'Admin / BDM' || userRole === 'Managing Director') && (
+                    <Link
+                      href="/dashboard/settings/users"
+                      onClick={() => setIsMenuOpen(false)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-slate-700 hover:text-slate-900 hover:bg-slate-100 font-semibold transition"
+                    >
+                      <Users className="w-4 h-4 text-slate-400" />
+                      <span>User &amp; Employee Management</span>
+                    </Link>
+                  )}
+
+                  <div className="my-1.5 border-t border-slate-100" />
+
+                  <form action={logout}>
+                    <button
+                      type="submit"
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 font-bold transition cursor-pointer text-left"
+                    >
+                      <LogOut className="w-4 h-4 text-rose-500" />
+                      <span>Sign Out / Logout</span>
+                    </button>
+                  </form>
                 </div>
               </div>
             </>

@@ -391,9 +391,12 @@ export async function requireRole(
   const user = await requireAuth();
 
   const isPermitted =
+    user.role === 'Admin' ||
+    user.role === 'Managing Director' ||
     allowedRoles.includes(user.role) ||
-    (user.role === 'Admin' &&
-      (allowedRoles.includes('Admin / BDM') ||
+    (user.role === 'Admin / BDM' &&
+      (allowedRoles.includes('Admin') ||
+        allowedRoles.includes('Admin / BDM') ||
         allowedRoles.includes('Managing Director') ||
         allowedRoles.includes('BDM')));
 

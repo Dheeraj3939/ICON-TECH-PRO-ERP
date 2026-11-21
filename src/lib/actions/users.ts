@@ -224,13 +224,17 @@ export async function createManagedUser(payload: {
     if (isOnline) {
       try {
         const admin = createAdminClient();
-        const { data: roleRow, error: roleErr } = await admin
-          .from('roles')
-          .select('id')
-          .eq('role_name', payload.role)
-          .single();
+        const { data: allRoles } = await admin.from('roles').select('id, role_name');
+        let roleRow = allRoles?.find(
+          (r: any) => r.role_name.toLowerCase() === payload.role.toLowerCase()
+        );
+        if (!roleRow && (payload.role === 'Admin' || payload.role === 'Admin / BDM')) {
+          roleRow = allRoles?.find(
+            (r: any) => r.role_name === 'Admin / BDM' || r.role_name === 'Admin'
+          );
+        }
 
-        if (roleErr || !roleRow) {
+        if (!roleRow) {
           return { success: false, error: `Role '${payload.role}' does not exist in database.` };
         }
 
@@ -278,7 +282,7 @@ export async function createManagedUser(payload: {
             // Provision in Supabase Auth without exposing passwords to admin
             const { data: newAuthData, error: createErr } = await admin.auth.admin.createUser({
               email: normalizedEmail,
-              email_confirm: false,
+              email_confirm: true,
               user_metadata: {
                 full_name: payload.name.trim(),
                 role: payload.role,
@@ -438,11 +442,15 @@ export async function updateManagedUserProfile(
     if (await isSupabaseAvailable()) {
       try {
         const admin = createAdminClient();
-        const { data: roleRow } = await admin
-          .from('roles')
-          .select('id')
-          .eq('role_name', payload.role)
-          .single();
+        const { data: allRoles } = await admin.from('roles').select('id, role_name');
+        let roleRow = allRoles?.find(
+          (r: any) => r.role_name.toLowerCase() === payload.role.toLowerCase()
+        );
+        if (!roleRow && (payload.role === 'Admin' || payload.role === 'Admin / BDM')) {
+          roleRow = allRoles?.find(
+            (r: any) => r.role_name === 'Admin / BDM' || r.role_name === 'Admin'
+          );
+        }
 
         if (roleRow) {
           await admin

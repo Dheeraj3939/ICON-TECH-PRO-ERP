@@ -463,17 +463,17 @@ export default function LoginPage() {
             <form action={handleSubmit} className="space-y-4">
             <div className="space-y-1">
               <label className="block text-xs font-medium text-slate-300">
-                ERP Login Email *
+                Registered Email ID or Mobile Number *
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Mail className="w-4 h-4" />
                 </div>
                 <input
-                  type="email"
+                  type="text"
                   name="email"
                   required
-                  placeholder={emailPlaceholder}
+                  placeholder="name@icontechpro.in or 10-digit mobile number"
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
                 />
               </div>

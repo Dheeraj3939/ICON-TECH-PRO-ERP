@@ -91,11 +91,45 @@ export async function getLoginUiConfig() {
 }
 
 export async function login(formData: FormData) {
-  const email = (formData.get('email') as string || '').toLowerCase().trim();
-  const password = (formData.get('password') as string || '');
+  const rawInput = (
+    (formData.get('email') as string) ||
+    (formData.get('identifier') as string) ||
+    ''
+  ).trim();
+  const password = (formData.get('password') as string) || '';
 
-  if (!email || !password) {
-    return { error: 'Please provide both email and password.' };
+  if (!rawInput || !password) {
+    return { error: 'Please provide both your registered email / phone number and password.' };
+  }
+
+  let email = rawInput.toLowerCase();
+
+  // If user entered a mobile phone number (10+ digits without @), resolve to their registered account email
+  const digitsOnly = rawInput.replace(/\D/g, '');
+  if (!rawInput.includes('@') && digitsOnly.length >= 10) {
+    const last10 = digitsOnly.slice(-10);
+    if (await isSupabaseAvailable()) {
+      try {
+        const admin = createAdminClient();
+        const { data: profileByPhone } = await admin
+          .from('user_profiles')
+          .select('email, phone')
+          .ilike('phone', `%${last10}%`)
+          .maybeSingle();
+
+        if (profileByPhone?.email) {
+          email = profileByPhone.email.toLowerCase();
+        }
+      } catch {}
+    }
+    if (email === rawInput.toLowerCase()) {
+      const memUser = getManagedUsersStore().find((u) =>
+        (u.phone || '').replace(/\D/g, '').endsWith(last10)
+      );
+      if (memUser?.email) {
+        email = memUser.email.toLowerCase();
+      }
+    }
   }
 
   // Enterprise 3-Attempt Lockout & Suspension Guard: Check before password evaluation
